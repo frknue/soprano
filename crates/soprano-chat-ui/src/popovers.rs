@@ -249,8 +249,8 @@ impl ComposerView {
         let t = cx.soprano_theme().clone();
         let focus = self.popover.as_ref().map(|p| p.focus.clone()).expect("popover");
         let (anchor_bounds, corner) = match kind {
-            PopoverKind::Model => (self.anchors.model.get(), Anchor::BottomLeft),
-            PopoverKind::Traits => (self.anchors.traits.get(), Anchor::BottomLeft),
+            PopoverKind::Model => (self.anchors.model.get(), Anchor::BottomRight),
+            PopoverKind::Traits => (self.anchors.traits.get(), Anchor::BottomRight),
             PopoverKind::Permissions => (self.anchors.permissions.get(), Anchor::BottomLeft),
             PopoverKind::Context => (self.anchors.meter.get(), Anchor::BottomRight),
         };

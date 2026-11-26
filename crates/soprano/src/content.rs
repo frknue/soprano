@@ -848,7 +848,11 @@ impl ContentHost {
         let attachments = soprano_platform::paths::data_dir(&soprano_platform::AppIdentity::current())
             .join(crate::agents_window::ATTACHMENTS_FOLDER);
         let view = cx.new(|cx| ChatView::new(session, agent_name.clone(), window, cx));
-        view.update(cx, |view, cx| view.set_attachments_dir(attachments, cx));
+        let machine = tab.remote.as_ref().map(|r| r.machine.clone());
+        view.update(cx, |view, cx| {
+            view.set_attachments_dir(attachments, cx);
+            view.set_machine_name(machine, cx);
+        });
         let target_for_events = target.clone();
         let subscription = cx.subscribe(&view, move |host, _, event: &ChatViewEvent, cx| {
             host.handle_chat_event(&target_for_events, &agent_name, event, cx);

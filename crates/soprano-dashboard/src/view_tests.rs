@@ -1228,3 +1228,35 @@ fn an_agent_typed_into_a_terminal_cannot_be_stopped_or_restarted_from_the_dashbo
     click(cx, "agent-dashboard-restart");
     assert!(harness.events.borrow().is_empty());
 }
+
+#[gpui::test]
+fn dashboard_composer_supports_at_file_mentions_and_renders_orca_attach_and_context_bar(
+    cx: &mut TestAppContext,
+) {
+    let mut workspace = Workspace::new();
+    let target = spawn(&mut workspace, "codex", "/tmp/projects/storefront");
+    set_status(&mut workspace, &target, AgentStatus::Waiting);
+    let (harness, cx) = open(cx, workspace, replying(), 1100., 720.);
+
+    assert!(cx.debug_bounds("agent-dashboard-attach").is_some());
+    assert!(cx.debug_bounds("agent-dashboard-composer-context").is_some());
+
+    let dashboard = harness.dashboard.clone();
+    cx.update(|_, cx| {
+        dashboard.update(cx, |dashboard, cx| {
+            dashboard.set_project_files(vec!["src/main.rs".into(), "src/composer.rs".into()], cx);
+        });
+    });
+
+    cx.simulate_keystrokes("tab");
+    cx.simulate_input("Check @comp");
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("agent-dashboard-mention-menu").is_some());
+
+    cx.simulate_keystrokes("tab");
+    cx.run_until_parked();
+    assert_eq!(composer_text(cx, &harness), "Check @src/composer.rs ");
+    assert!(cx.debug_bounds("agent-dashboard-mention-menu").is_none());
+    // Tab picked the mention rather than leaving the composer.
+    assert!(composer_focused(cx, &harness));
+}

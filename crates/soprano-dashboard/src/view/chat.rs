@@ -9,8 +9,10 @@ use gpui::{
 };
 use gpui_component::input::Textarea;
 use soprano_chat_ui::composer::EDITOR_LINE_HEIGHT;
+use soprano_chat_ui::mentions::{render_composer_context_bar, split_mention_path};
 use soprano_chat_ui::widgets::text_size;
 use soprano_ui::button::IconButton;
+use soprano_ui::fonts::UI_FONT_FAMILY;
 use soprano_ui::status::StatusPill;
 use soprano_ui::tooltip::tooltip;
 use soprano_ui::{Icon, IconName, Monogram, SopranoTheme, agent_icon_stem, file_type_icon, icon};
@@ -35,6 +37,7 @@ impl AgentDashboard {
         let inset = self.composer_inset(theme);
         self.timeline.update(cx, |timeline, cx| timeline.set_bottom_inset(theme.z(inset), cx));
         let controls = self.controls();
+        self.sync_mention_menu(window, cx);
         let composer = div().w(theme.z(lane)).child(self.render_composer(theme, cx));
         let body: AnyElement = match (&self.draft, self.selected()) {
             // A new thread: headline and composer in the middle of the column.
@@ -307,8 +310,9 @@ impl AgentDashboard {
             )
     }
 
-    /// The floating composer: what the message brings along, the editor over the agent, a
-    /// hint and the round send button. Files dropped onto it are attached.
+    /// The floating composer: what the message brings along, the editor over the `+` attach
+    /// button, agent chip, hint, model/thinking chips and the round send button, plus Orca's
+    /// host/folder/branch strip underneath and `@` file-mention popup above.
     fn render_composer(&self, theme: &SopranoTheme, cx: &mut Context<Self>) -> impl IntoElement {
         let enabled = self.composer_enabled();
         let can_send =
@@ -316,7 +320,26 @@ impl AgentDashboard {
         let (hint, failed) = self.composer_hint();
         let dashboard = cx.entity().downgrade();
         let accent = theme.accent;
-        div()
+        let hover = theme.hover;
+        let attach_button = div()
+            .id("agent-dashboard-attach")
+            .debug_selector(|| "agent-dashboard-attach".into())
+            .size(theme.z(28.))
+            .rounded(theme.z(8.))
+            .flex()
+            .flex_none()
+            .items_center()
+            .justify_center()
+            .tooltip(tooltip("Attach files"))
+            .when(enabled, |button| {
+                button
+                    .cursor_pointer()
+                    .hover(move |s| s.bg(hover))
+                    .on_click(cx.listener(|this, _, window, cx| this.open_file_picker(window, cx)))
+            })
+            .when(!enabled, |button| button.opacity(0.45))
+            .child(icon(IconName::Plus).size(15.).color(theme.muted));
+        let card = div()
             .id("agent-dashboard-composer")
             .debug_selector(|| "agent-dashboard-composer".into())
             .relative()
@@ -342,7 +365,6 @@ impl AgentDashboard {
                     }),
                 )
             })
-            .child(measure(&self.composer_bounds))
             .children(self.render_attachments(theme, cx))
             .child(
                 div()
@@ -371,13 +393,12 @@ impl AgentDashboard {
                     .flex()
                     .flex_row()
                     .items_center()
-                    .gap(theme.z(8.))
+                    .gap(theme.z(4.))
                     .h(theme.z(32.))
                     .mx(theme.z(8.))
                     .mb(theme.z(8.))
+                    .child(attach_button)
                     .child(self.render_agent_chip(theme, cx))
-                    .children(self.render_option_chip(ThreadOption::Model, theme, cx))
-                    .children(self.render_option_chip(ThreadOption::Thinking, theme, cx))
                     .child(
                         div()
                             .id("agent-dashboard-composer-hint")
@@ -389,8 +410,127 @@ impl AgentDashboard {
                             .text_color(if failed { theme.failed } else { theme.muted })
                             .child(hint),
                     )
-                    .child(send_button(can_send, theme, cx)),
-            )
+                    .child(
+                        div()
+                            .flex()
+                            .flex_row()
+                            .items_center()
+                            .children(self.render_option_chip(ThreadOption::Model, theme, cx))
+                            .children(self.render_option_chip(ThreadOption::Thinking, theme, cx)),
+                    )
+                    .child(div().ml(theme.z(4.)).child(send_button(can_send, theme, cx))),
+            );
+        div()
+            .relative()
+            .w_full()
+            .child(measure(&self.composer_bounds))
+            .child(card)
+            .children(render_composer_context_bar(
+                "agent-dashboard-composer-context",
+                &self.composer_context,
+                |v| theme.z(v),
+                1.0,
+                theme,
+            ))
+            .children(self.render_mention_menu(theme, cx))
+    }
+
+    /// The `@` file-mention popup floating above the dashboard composer.
+    fn render_mention_menu(&self, theme: &SopranoTheme, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let menu = self.mention.as_ref()?;
+        let matches = self.shown_mentions();
+        let empty = if menu.token.query.is_empty() {
+            "No files found in this folder.".to_owned()
+        } else {
+            format!("No files match “@{}”", menu.token.query)
+        };
+        Some(
+            div()
+                .id("agent-dashboard-mention-menu")
+                .debug_selector(|| "agent-dashboard-mention-menu".into())
+                .absolute()
+                .left_0()
+                .right_0()
+                .bottom_full()
+                .mb(theme.z(6.))
+                .rounded(theme.z(8.))
+                .border_1()
+                .border_color(theme.border)
+                .bg(theme.popover)
+                .shadow_lg()
+                .p(theme.z(4.))
+                .max_h(theme.z(288.))
+                .overflow_y_scroll()
+                .track_scroll(&self.mention_scroll)
+                .occlude()
+                .map(|list| {
+                    if matches.is_empty() {
+                        return list.child(
+                            div()
+                                .min_h(theme.z(28.))
+                                .px(theme.z(8.))
+                                .flex()
+                                .items_center()
+                                .font_family(UI_FONT_FAMILY)
+                                .text_size(theme.z(text_size::ROW))
+                                .text_color(theme.muted)
+                                .child(empty),
+                        );
+                    }
+                    list.children(matches.into_iter().enumerate().map(|(index, path)| {
+                        let highlighted = menu.highlighted == Some(index);
+                        let (name, parent) = split_mention_path(&path);
+                        let name = name.to_owned();
+                        let parent = parent.map(str::to_owned);
+                        let icon_name = file_type_icon(&name);
+                        let insert = path;
+                        div()
+                            .id(SharedString::from(format!("agent-dashboard-mention-{index}")))
+                            .min_h(theme.z(28.))
+                            .px(theme.z(8.))
+                            .py(theme.z(4.))
+                            .rounded(theme.z(4.))
+                            .flex()
+                            .flex_row()
+                            .items_center()
+                            .gap(theme.z(8.))
+                            .cursor_pointer()
+                            .when(highlighted, |row| row.bg(theme.foreground.opacity(0.09)))
+                            .on_hover(cx.listener(move |this, hovered: &bool, _, cx| {
+                                if *hovered {
+                                    this.set_mention_highlight(index, cx);
+                                }
+                            }))
+                            .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                            .on_click(cx.listener(move |this, _, window, cx| {
+                                this.insert_mention(&insert, window, cx);
+                            }))
+                            .child(icon(icon_name).size(13.).color(theme.muted))
+                            .child(
+                                div()
+                                    .flex_none()
+                                    .font_family(UI_FONT_FAMILY)
+                                    .text_size(theme.z(text_size::ROW))
+                                    .font_weight(FontWeight::MEDIUM)
+                                    .text_color(theme.foreground)
+                                    .child(name),
+                            )
+                            .when_some(parent, |row, parent| {
+                                row.child(
+                                    div()
+                                        .flex_1()
+                                        .min_w_0()
+                                        .truncate()
+                                        .font_family(UI_FONT_FAMILY)
+                                        .text_size(theme.z(text_size::SMALL))
+                                        .text_color(theme.muted)
+                                        .child(parent),
+                                )
+                            })
+                    }))
+                })
+                .into_any_element(),
+        )
     }
 
     /// What the message brings along, over the editor: images as thumbnails, other files by
@@ -507,6 +647,10 @@ impl AgentDashboard {
             ThreadOption::Model => ("agent-dashboard-model", "The model the thread runs on", 0),
             ThreadOption::Thinking => ("agent-dashboard-thinking", "How hard the model thinks", 1),
         };
+        let has_thinking = ThreadOption::Thinking.of(self.composer_options()).is_some();
+        let show_chevron = kind == ThreadOption::Thinking || !has_thinking;
+        let text_color =
+            if kind == ThreadOption::Thinking { theme.muted } else { theme.foreground.opacity(0.88) };
         let (hover, foreground) = (theme.hover, theme.foreground);
         Some(
             div()
@@ -518,9 +662,11 @@ impl AgentDashboard {
                 .items_center()
                 .gap(theme.z(4.))
                 .h(theme.z(28.))
-                .px(theme.z(8.))
+                .pl(theme.z(if kind == ThreadOption::Thinking { 4. } else { 8. }))
+                .pr(theme.z(8.))
                 .rounded(theme.z(8.))
-                .text_color(theme.foreground.opacity(0.8))
+                .font_weight(FontWeight::MEDIUM)
+                .text_color(text_color)
                 // The model's name gives way first in a narrow composer.
                 .when(kind == ThreadOption::Model, |chip| chip.min_w(theme.z(48.)))
                 .when(kind == ThreadOption::Thinking, |chip| chip.flex_none())
@@ -536,7 +682,9 @@ impl AgentDashboard {
                 })
                 .when(!self.options_enabled(), |chip| chip.opacity(0.55))
                 .child(div().min_w_0().truncate().child(SharedString::from(kind.label(option))))
-                .child(icon(IconName::ChevronDown).size(12.).color(theme.muted)),
+                .when(show_chevron, |chip| {
+                    chip.child(icon(IconName::ChevronDown).size(11.).color(theme.muted))
+                }),
         )
     }
 }

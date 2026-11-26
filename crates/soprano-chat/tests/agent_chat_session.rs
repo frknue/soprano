@@ -532,6 +532,88 @@ fn answers_by_question_become_the_forms_content_with_typed_answers_under_the_oth
 }
 
 #[test]
+fn titled_enums_and_enum_names_display_human_labels_while_returning_wire_values() {
+    // Matches Antigravity (`agy acp`) and standard MCP/ACP elicitation schemas:
+    // - `const` is a short machine value ("1", "2") while `title` is the human label
+    // - single-underscore `q0_other` companion field for custom write-ins
+    // - `enum` + `enumNames` for single- and multi-select fields
+    let schema = json!({
+        "type": "object",
+        "properties": {
+            "q0": {
+                "type": "string",
+                "title": "How should the mic button work?",
+                "oneOf": [
+                    {"const": "1", "title": "(Recommended) Trigger macOS Dictation"},
+                    {"const": "2", "title": "Skip for now"},
+                    {"const": "3", "title": "Add Whisper STT", "description": "Local model"}
+                ],
+                "default": "1"
+            },
+            "q0_other": {"type": "string", "title": "Other"},
+            "q1": {
+                "type": "array",
+                "title": "Which views?",
+                "items": {
+                    "anyOf": [
+                        {"const": "chat", "title": "Chat UI tabs"},
+                        {"const": "dash", "title": "Agent Dashboard"}
+                    ]
+                }
+            },
+            "q2": {
+                "type": "string",
+                "title": "Branch?",
+                "enum": ["feat", "main"],
+                "enumNames": ["New feature branch", "Directly on main"]
+            }
+        }
+    });
+    let question = AgentChatQuestion::new("Questions", &schema).expect("question");
+    // Companion `q0_other` is paired with `q0`, not shown as a separate question.
+    assert_eq!(question.fields.iter().map(|f| f.key.as_str()).collect::<Vec<_>>(), vec!["q0", "q1", "q2"]);
+    assert_eq!(question.fields[0].other_key.as_deref(), Some("q0_other"));
+    assert_eq!(question.fields[0].recommended.as_deref(), Some("(Recommended) Trigger macOS Dictation"));
+
+    // The UI sees human-readable labels, never raw "1"/"2"/"3".
+    let request = question.user_input_request("r");
+    assert_eq!(
+        request.questions[0].options.iter().map(|o| o.label.as_str()).collect::<Vec<_>>(),
+        vec!["(Recommended) Trigger macOS Dictation", "Skip for now", "Add Whisper STT"]
+    );
+    assert_eq!(request.questions[0].options[2].description.as_deref(), Some("Local model"));
+    assert!(request.questions[0].allows_other);
+    assert_eq!(
+        request.questions[2].options.iter().map(|o| o.label.as_str()).collect::<Vec<_>>(),
+        vec!["New feature branch", "Directly on main"]
+    );
+
+    // Picking by label sends wire `const`/`enum` values back to the agent, and decodes back to
+    // human labels for the timeline.
+    let picked = BTreeMap::from([
+        ("q0".into(), vec!["(Recommended) Trigger macOS Dictation".into()]),
+        ("q1".into(), vec!["Chat UI tabs".into(), "Agent Dashboard".into()]),
+        ("q2".into(), vec!["Directly on main".into()]),
+    ]);
+    let content = question.content(&picked);
+    assert_eq!(Value::Object(content.clone()), json!({"q0": "1", "q1": ["chat", "dash"], "q2": "main"}));
+    assert_eq!(question.answers(&content), picked);
+
+    // Typing a custom answer sends it under `q0_other`.
+    let custom = BTreeMap::from([
+        ("q0".into(), vec!["Use push-to-talk".into()]),
+        ("q1".into(), vec!["Chat UI tabs".into()]),
+        ("q2".into(), vec!["New feature branch".into()]),
+    ]);
+    let custom_content = question.content(&custom);
+    assert_eq!(
+        Value::Object(custom_content.clone()),
+        json!({"q0_other": "Use push-to-talk", "q1": ["chat"], "q2": "feat"})
+    );
+    assert_eq!(question.answers(&custom_content), custom);
+}
+
+#[test]
 fn an_agent_that_exits_mid_turn_ends_the_turn_and_reports_why() {
     let (mut session, agent, events) = started();
     session.send("Go");

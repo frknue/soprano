@@ -907,6 +907,11 @@ fn handle_codex_request(
                 let title = q.get("question").and_then(Value::as_str).unwrap_or("");
                 let header = q.get("header").and_then(Value::as_str).unwrap_or("");
                 let is_other = q.get("isOther").and_then(Value::as_bool).unwrap_or(false);
+                let is_multi = q
+                    .get("isMultiSelect")
+                    .or_else(|| q.get("multiSelect"))
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false);
                 let options: Vec<Value> = q
                     .get("options")
                     .and_then(Value::as_array)
@@ -915,19 +920,24 @@ fn handle_codex_request(
                             .filter_map(|o| {
                                 let label = o.get("label").and_then(Value::as_str)?;
                                 let desc = o.get("description").and_then(Value::as_str).unwrap_or("");
-                                Some(json!({"const": label, "description": desc}))
+                                Some(json!({"const": label, "title": label, "description": desc}))
                             })
                             .collect()
                     })
                     .unwrap_or_default();
                 let mut prop = Map::new();
-                prop.insert("type".into(), Value::String("string".into()));
                 prop.insert("title".into(), Value::String(title.to_owned()));
                 if !header.is_empty() {
                     prop.insert("description".into(), Value::String(header.to_owned()));
                 }
-                if !options.is_empty() {
-                    prop.insert("oneOf".into(), Value::Array(options));
+                if is_multi {
+                    prop.insert("type".into(), Value::String("array".into()));
+                    prop.insert("items".into(), json!({"anyOf": options}));
+                } else {
+                    prop.insert("type".into(), Value::String("string".into()));
+                    if !options.is_empty() {
+                        prop.insert("oneOf".into(), Value::Array(options));
+                    }
                 }
                 properties.insert(qid.to_owned(), Value::Object(prop));
                 if is_other {

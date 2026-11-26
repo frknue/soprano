@@ -18,6 +18,7 @@ pub mod composer_logic;
 mod composer_parts;
 pub mod format;
 pub mod keys;
+pub mod mentions;
 mod popovers;
 mod row_views;
 pub mod rows;

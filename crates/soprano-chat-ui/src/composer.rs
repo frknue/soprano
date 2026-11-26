@@ -17,12 +17,12 @@ use std::cell::Cell;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::rc::Rc;
-use std::time::{Duration, SystemTime};
+use std::time::{Duration, Instant, SystemTime};
 
 use gpui::{
     App, Bounds, ClipboardEntry, ClipboardItem, Context, Entity, EventEmitter, ExternalPaths, FocusHandle,
-    Focusable, IntoElement, KeyDownEvent, ModifiersChangedEvent, ParentElement, Pixels, Render, Styled,
-    Subscription, Task, Window, canvas, div, prelude::*,
+    Focusable, IntoElement, KeyDownEvent, ModifiersChangedEvent, ParentElement, PathPromptOptions, Pixels,
+    Render, Styled, Subscription, Task, Window, canvas, div, prelude::*,
 };
 use gpui_component::input::{
     Enter, Escape, IndentInline, InputEvent, MoveDown, MoveUp, Textarea, TextareaState,
@@ -39,6 +39,10 @@ use crate::composer_logic::{
     SlashToken, THINKING_CATEGORY, chip_compaction, matching_commands, option_of, placeholder,
 };
 use crate::keys;
+use crate::mentions::{
+    ComposerContextInfo, MENTION_ROW_LIMIT, MentionMenu, MentionToken, list_project_files, matching_files,
+    render_composer_context_bar,
+};
 use crate::popovers::{Popover, PopoverKind};
 use crate::source::SharedSession;
 use crate::timeline_view::CHAT_MAX_WIDTH;
@@ -94,6 +98,21 @@ pub struct ComposerView {
     pub(crate) slash_scroll: gpui::ScrollHandle,
     /// Escape (or text the composer set) hid the menu until the caret leaves the token.
     slash_dismissed: bool,
+    /// The `@` file-mention menu while it shows.
+    pub(crate) mention: Option<MentionMenu>,
+    /// The `@` menu's scroll position (the highlight stays in view).
+    pub(crate) mention_scroll: gpui::ScrollHandle,
+    /// Escape (or text the composer set) hid the `@` menu until the caret leaves the token.
+    mention_dismissed: bool,
+    /// Indexed relative paths under the session's `cwd` for `@` autocomplete.
+    project_files: Vec<String>,
+    project_files_root: Option<PathBuf>,
+    project_files_loaded_at: Option<Instant>,
+    file_index_task: Option<Task<()>>,
+    /// Optional remote machine label for the context bar under the composer.
+    remote_machine: Option<String>,
+    /// Cached host, folder, checkout kind, and git branch shown beneath the composer card.
+    pub(crate) context_info: ComposerContextInfo,
     /// The editor's text was set by the composer, not typed.
     setting_text: bool,
     /// Where the chips and the meter sit, for the popovers they open.
@@ -141,7 +160,9 @@ impl ComposerView {
     ) -> Self {
         let agent_name = agent_name.into();
         let editor = cx.new(|cx| {
-            TextareaState::new(window, cx).auto_grow(2, EDITOR_MAX_LINES).placeholder("Ask anything")
+            TextareaState::new(window, cx)
+                .auto_grow(2, EDITOR_MAX_LINES)
+                .placeholder("Ask anything, @ to mention files, / for commands")
         });
         let subscription =
             cx.subscribe_in(&editor, window, |this, _, event: &InputEvent, window, cx| match event {
@@ -149,11 +170,13 @@ impl ComposerView {
                 InputEvent::Focus => cx.emit(ComposerEvent::FocusChanged(true)),
                 InputEvent::Blur => {
                     this.slash = None;
+                    this.mention = None;
                     cx.emit(ComposerEvent::FocusChanged(false));
                     cx.notify();
                 }
                 InputEvent::PressEnter { .. } => {}
             });
+        let context_info = ComposerContextInfo::from_cwd(&session.borrow().launch.spec.cwd, None);
         let mut view = Self {
             session,
             agent_name,
@@ -172,6 +195,15 @@ impl ComposerView {
             slash: None,
             slash_scroll: gpui::ScrollHandle::new(),
             slash_dismissed: false,
+            mention: None,
+            mention_scroll: gpui::ScrollHandle::new(),
+            mention_dismissed: false,
+            project_files: Vec::new(),
+            project_files_root: None,
+            project_files_loaded_at: None,
+            file_index_task: None,
+            remote_machine: None,
+            context_info,
             setting_text: false,
             anchors: Rc::new(Anchors::default()),
             attachments_dir: std::env::temp_dir().join("soprano-attachments"),
@@ -188,10 +220,55 @@ impl ComposerView {
     pub fn close(&mut self, cx: &mut Context<Self>) {
         self.popover = None;
         self.slash = None;
+        self.mention = None;
+        self.file_index_task = None;
         self.auto_advance = None;
         self.attachments.drain(..).for_each(Attachment::discard);
         self.attach_error = None;
         cx.notify();
+    }
+
+    /// Sets the remote machine label shown in the context bar under the composer (`None` = local
+    /// machine name).
+    pub fn set_machine_name(&mut self, machine: Option<String>, cx: &mut Context<Self>) {
+        self.remote_machine = machine;
+        self.refresh_context_info();
+        cx.notify();
+    }
+
+    /// Populates the `@` file-mention candidate list directly (also used in tests).
+    pub fn set_project_files(&mut self, files: Vec<String>, cx: &mut Context<Self>) {
+        self.project_files = files;
+        self.project_files_root = Some(self.session.borrow().launch.spec.cwd.clone());
+        self.project_files_loaded_at = Some(Instant::now());
+        cx.notify();
+    }
+
+    fn refresh_context_info(&mut self) {
+        let cwd = self.session.borrow().launch.spec.cwd.clone();
+        self.context_info = ComposerContextInfo::from_cwd(&cwd, self.remote_machine.as_deref());
+    }
+
+    /// Opens the OS file dialog to attach one or more files/images (`+` button).
+    pub(crate) fn open_file_picker(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.can_attach() {
+            return;
+        }
+        let receiver = cx.prompt_for_paths(PathPromptOptions {
+            files: true,
+            directories: false,
+            multiple: true,
+            prompt: Some("Attach files".into()),
+        });
+        cx.spawn_in(window, async move |this, cx| {
+            if let Ok(Ok(Some(paths))) = receiver.await {
+                let _ = this.update_in(cx, |this, window, cx| {
+                    this.attach_files(paths, cx);
+                    this.focus_editor(window, cx);
+                });
+            }
+        })
+        .detach();
     }
 
     /// Where images pasted into the composer are kept as files for the agent to read.
@@ -204,7 +281,7 @@ impl ComposerView {
         &self.attachments
     }
 
-    fn can_attach(&self) -> bool {
+    pub fn can_attach(&self) -> bool {
         !self.is_stopped() && self.question_request_id.is_none()
     }
 
@@ -386,7 +463,9 @@ impl ComposerView {
         self.editor.update(cx, |editor, cx| editor.set_placeholder(text, window, cx));
         if self.permission().is_some() || self.question_request_id.is_some() {
             self.slash = None;
+            self.mention = None;
         }
+        self.refresh_context_info();
         cx.notify();
     }
 
@@ -436,9 +515,146 @@ impl ComposerView {
         }
         if self.setting_text {
             self.slash_dismissed = true;
+            self.mention_dismissed = true;
         }
         self.sync_slash_menu(window, cx);
+        self.sync_mention_menu(window, cx);
         cx.notify();
+    }
+
+    /// Refreshes the cached list of project files on a background thread when stale or missing.
+    fn ensure_project_files(&mut self, cx: &mut Context<Self>) {
+        let cwd = self.session.borrow().launch.spec.cwd.clone();
+        let fresh = self.project_files_root.as_ref() == Some(&cwd)
+            && self.project_files_loaded_at.is_some_and(|at| at.elapsed() < Duration::from_secs(10));
+        if fresh || self.file_index_task.is_some() {
+            return;
+        }
+        let target_cwd = cwd.clone();
+        self.file_index_task = Some(cx.spawn(async move |this, cx| {
+            let files = cx.background_executor().spawn(async move { list_project_files(&target_cwd) }).await;
+            let _ = this.update(cx, |this, cx| {
+                this.project_files = files;
+                this.project_files_root = Some(cwd);
+                this.project_files_loaded_at = Some(Instant::now());
+                this.file_index_task = None;
+                cx.notify();
+            });
+        }));
+    }
+
+    /// Opens, filters or closes the `@` file-mention menu for the token at the caret.
+    pub(crate) fn sync_mention_menu(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let (text, selection) = {
+            let editor = self.editor.read(cx);
+            (editor.value().to_string(), editor.selected_range())
+        };
+        let token = (self.slash.is_none()
+            && self.question_request_id.is_none()
+            && self.permission().is_none()
+            && selection.is_empty())
+        .then(|| MentionToken::at(&text, selection.start))
+        .flatten();
+        let Some(token) = token else {
+            self.mention_dismissed = false;
+            self.mention = None;
+            return;
+        };
+        let focused = self.editor.focus_handle(cx).is_focused(window);
+        if self.mention_dismissed || !focused {
+            self.mention = None;
+            return;
+        }
+        self.ensure_project_files(cx);
+        let matches: Vec<String> = matching_files(&self.project_files, &token.query, MENTION_ROW_LIMIT)
+            .into_iter()
+            .map(str::to_owned)
+            .collect();
+        let kept = match &self.mention {
+            Some(menu) if menu.token == token => menu.highlighted_path.clone(),
+            _ => None,
+        };
+        if self.mention.as_ref().is_none_or(|menu| menu.token != token) {
+            self.popover = None;
+        }
+        let highlighted = kept
+            .and_then(|path| matches.iter().position(|candidate| candidate == &path))
+            .or((!matches.is_empty()).then_some(0));
+        let changed =
+            self.mention.as_ref().is_none_or(|menu| menu.token != token || menu.highlighted != highlighted);
+        self.mention = Some(MentionMenu {
+            token,
+            highlighted,
+            highlighted_path: highlighted.and_then(|h| matches.get(h)).cloned(),
+        });
+        if changed && let Some(index) = highlighted {
+            self.mention_scroll.scroll_to_item(index);
+        }
+    }
+
+    /// Replaces the typed `@` token with `@<path> `, keeping what follows it.
+    pub(crate) fn insert_mention(&mut self, path: &str, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(menu) = self.mention.take() else { return };
+        let text = self.text(cx);
+        let (range, insert) = menu.token.replacement(path, &text);
+        let mut edited = String::with_capacity(text.len() + insert.len());
+        edited.push_str(&text[..range.start]);
+        edited.push_str(&insert);
+        edited.push_str(&text[range.end.min(text.len())..]);
+        let caret = range.start + insert.len();
+        self.editor.update(cx, |editor, cx| {
+            editor.set_value(edited, window, cx);
+            editor.set_selected_range(caret..caret, cx);
+        });
+        self.mention_dismissed = true;
+        self.focus_editor(window, cx);
+        cx.notify();
+    }
+
+    pub(crate) fn dismiss_mention_menu(&mut self, cx: &mut Context<Self>) {
+        self.mention_dismissed = true;
+        self.mention = None;
+        cx.notify();
+    }
+
+    pub(crate) fn shown_mentions(&self) -> Vec<String> {
+        match &self.mention {
+            Some(menu) => matching_files(&self.project_files, &menu.token.query, MENTION_ROW_LIMIT)
+                .into_iter()
+                .map(str::to_owned)
+                .collect(),
+            None => Vec::new(),
+        }
+    }
+
+    pub(crate) fn move_mention_highlight(&mut self, delta: isize, cx: &mut Context<Self>) {
+        let count = self.shown_mentions().len();
+        if count == 0 {
+            return;
+        }
+        let current = self.mention.as_ref().and_then(|m| m.highlighted);
+        let current = current.map_or(if delta > 0 { -1 } else { count as isize }, |h| h as isize);
+        self.set_mention_highlight((current + delta).clamp(0, count as isize - 1) as usize, cx);
+    }
+
+    pub(crate) fn set_mention_highlight(&mut self, index: usize, cx: &mut Context<Self>) {
+        let path = self.shown_mentions().get(index).cloned();
+        if let Some(menu) = self.mention.as_mut() {
+            menu.highlighted = Some(index);
+            menu.highlighted_path = path;
+            self.mention_scroll.scroll_to_item(index);
+            cx.notify();
+        }
+    }
+
+    pub(crate) fn choose_highlighted_mention(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        let mentions = self.shown_mentions();
+        let Some(path) = self.mention.as_ref().and_then(|m| m.highlighted).and_then(|h| mentions.get(h))
+        else {
+            return false;
+        };
+        self.insert_mention(path, window, cx);
+        true
     }
 
     /// Opens, filters or closes the `/` menu for the token at the caret.
@@ -596,10 +812,14 @@ impl ComposerView {
         cx.notify();
     }
 
-    /// Escape: closes the `/` menu or a popover, else stops the running turn.
+    /// Escape: closes the `/` or `@` menu or a popover, else stops the running turn.
     pub(crate) fn escape(&mut self, cx: &mut Context<Self>) -> bool {
         if self.slash.is_some() {
             self.dismiss_slash_menu(cx);
+            return true;
+        }
+        if self.mention.is_some() {
+            self.dismiss_mention_menu(cx);
             return true;
         }
         if self.popover.is_some() {
@@ -711,6 +931,7 @@ impl ComposerView {
             return;
         }
         self.slash = None;
+        self.mention = None;
         self.popover = Some(Popover::new(kind, self, window, cx));
         cx.notify();
     }
@@ -751,22 +972,39 @@ impl ComposerView {
             }
             return;
         }
+        if !action.secondary && self.mention.is_some() {
+            if !self.choose_highlighted_mention(window, cx) {
+                self.dismiss_mention_menu(cx);
+            }
+            return;
+        }
         self.submit(action.secondary, window, cx);
     }
 
     fn on_tab(&mut self, _: &IndentInline, window: &mut Window, cx: &mut Context<Self>) {
-        if self.slash.is_none() {
+        if self.slash.is_some() {
+            cx.stop_propagation();
+            if !self.choose_highlighted_command(window, cx) {
+                self.dismiss_slash_menu(cx);
+            }
             return;
         }
-        cx.stop_propagation();
-        if !self.choose_highlighted_command(window, cx) {
-            self.dismiss_slash_menu(cx);
+        if self.mention.is_some() {
+            cx.stop_propagation();
+            if !self.choose_highlighted_mention(window, cx) {
+                self.dismiss_mention_menu(cx);
+            }
         }
     }
 
     fn on_move(&mut self, up: bool, window: &mut Window, cx: &mut Context<Self>) {
         if self.slash.is_some() {
             self.move_slash_highlight(if up { -1 } else { 1 }, cx);
+            cx.stop_propagation();
+            return;
+        }
+        if self.mention.is_some() {
+            self.move_mention_highlight(if up { -1 } else { 1 }, cx);
             cx.stop_propagation();
             return;
         }
@@ -855,6 +1093,7 @@ impl ComposerView {
 impl Render for ComposerView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.sync_slash_menu(window, cx);
+        self.sync_mention_menu(window, cx);
         let t = cx.soprano_theme().clone();
         let can_attach = self.can_attach();
         let has_attachments = self.question_request_id.is_none() && !self.attachments.is_empty();
@@ -932,7 +1171,15 @@ impl Render for ComposerView {
                     )
                     .child(self.render_footer(window, cx)),
             )
+            .children(render_composer_context_bar(
+                "chat-composer-context",
+                &self.context_info,
+                |v| t.cz(v),
+                t.chat_zoom_factor(),
+                &t,
+            ))
             .children(self.render_slash_menu(cx))
+            .children(self.render_mention_menu(cx))
             .children(self.render_popover(window, cx))
     }
 }

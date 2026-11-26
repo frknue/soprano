@@ -10,6 +10,11 @@ the single source of truth for the version shown in **Settings ▸ About**.
 ## [Unreleased]
 
 ### Added
+- **Orca-style composer in Chat UI and Agent Dashboard**: updated both composers with `@`
+  file-mention autocomplete (fuzzy-searching project files with `↑`/`↓` and `Tab`/`Enter`),
+  a `+` button to attach files via the OS file picker, a left-aligned shield permissions
+  dropdown (amber when bypassing approvals) paired with right-aligned `Model Thinking ⌄`
+  controls, and a host / folder · checkout kind / git branch context strip beneath the card.
 - **Open in VS Code**: `⌃A` → `V` (`open-in-vscode`, also in the command palette) opens
   the active tab's directory in Visual Studio Code.
 - **Chat UI for all built-in agents**: native Chat UI now supports **Claude Code**
@@ -338,6 +343,11 @@ the single source of truth for the version shown in **Settings ▸ About**.
   actions. Workspaces saved with depth layers reopen with each layer as its own tab.
 
 ### Fixed
+- **Interactive question choices in Chat UI across all agents**: questions from Antigravity
+  (`agy acp`), Claude Code (`AskUserQuestion`), Codex, OpenCode, and omp now show each
+  choice's human-readable `title` / `enumNames` label (wrapping long text cleanly) while
+  sending the schema's wire `const` / `enum` value back to the agent, and recognize both
+  `__other` and `_other` custom write-in fields.
 - **Drag-and-drop and paste attachments in Chat UI**: dropping screenshots or files from
   Finder or the File Explorer onto a Chat UI composer or pane, or pasting copied images and
   files (`⌘V`), now attaches them as thumbnails and chips and sends their paths with your

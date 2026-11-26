@@ -508,7 +508,7 @@ pub fn placeholder(
     if has_permission {
         return "Send a message to decline and redirect the agent".into();
     }
-    "Ask anything".into()
+    "Ask anything, @ to mention files, / for commands".into()
 }
 
 #[cfg(test)]
@@ -702,6 +702,9 @@ mod tests {
         );
         assert_eq!(placeholder(None, true, false, "omp"), "omp stopped. Press Return to restart it.");
         assert_eq!(placeholder(None, false, true, "omp"), "Send a message to decline and redirect the agent");
-        assert_eq!(placeholder(None, false, false, "omp"), "Ask anything");
+        assert_eq!(
+            placeholder(None, false, false, "omp"),
+            "Ask anything, @ to mention files, / for commands"
+        );
     }
 }

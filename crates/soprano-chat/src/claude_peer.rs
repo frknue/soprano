@@ -17,7 +17,7 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use serde_json::{Value, json};
+use serde_json::{Map, Value, json};
 use soprano_agents::{
     AgentTranscriptFormat, AgentTranscriptSource, JsonValueExt, TimelineItemKind, ToolCallState,
 };
@@ -35,6 +35,20 @@ const CLAUDE_MODELS: &[(&str, &str)] = &[
     ("haiku", "Claude Haiku"),
 ];
 
+/// A Claude Code `control_request` waiting for the user's decision in Chat UI.
+#[derive(Clone, Debug)]
+pub enum PendingClaudeRequest {
+    Permission {
+        request_id: String,
+    },
+    Question {
+        request_id: String,
+        original_input: Value,
+        /// `(field_key, question_text)` for each asked question.
+        questions: Vec<(String, String)>,
+    },
+}
+
 /// Stateful translator from Claude Code `stream-json` stdout objects into ACP [`PeerEvent`]s.
 /// Separated from process I/O so unit tests can exercise every message type deterministically.
 pub struct ClaudeStreamTranslator {
@@ -50,8 +64,8 @@ pub struct ClaudeStreamTranslator {
     started_tools: HashSet<String>,
     /// Diff blocks attached to file-edit tool calls so `tool_result` updates preserve them.
     tool_diffs: HashMap<String, Vec<Value>>,
-    /// Pending `control_request` ids awaiting an ACP reply (`acp_req_id` -> `claude_request_id`).
-    pub pending_control_requests: HashMap<String, String>,
+    /// Pending `control_request`s awaiting an ACP reply (`acp_req_id` -> pending request).
+    pub pending_control_requests: HashMap<String, PendingClaudeRequest>,
     next_control_id: u64,
 }
 
@@ -293,25 +307,46 @@ impl ClaudeStreamTranslator {
                 if req.get("subtype").and_then(Value::as_str) == Some("can_use_tool") {
                     let tool_name = req.get("tool_name").and_then(Value::as_str).unwrap_or("Tool");
                     let input = req.get("input").cloned().unwrap_or(Value::Null);
-                    let (acp_kind, title) = claude_tool_summary(tool_name, &input);
                     self.next_control_id += 1;
                     let acp_req_id = format!("claude-ctrl-{}", self.next_control_id);
-                    self.pending_control_requests.insert(acp_req_id.clone(), request_id.to_owned());
-                    out.push(PeerEvent::Request {
-                        id: Value::String(acp_req_id),
-                        method: "session/request_permission".into(),
-                        params: json!({
-                            "toolCall": {
-                                "title": title,
-                                "kind": acp_kind,
-                                "rawInput": input,
+                    if tool_name == "AskUserQuestion"
+                        && let Some((params, questions)) = claude_ask_user_question_to_elicitation(&input)
+                    {
+                        self.pending_control_requests.insert(
+                            acp_req_id.clone(),
+                            PendingClaudeRequest::Question {
+                                request_id: request_id.to_owned(),
+                                original_input: input,
+                                questions,
                             },
-                            "options": [
-                                {"optionId": "allow", "name": "Allow", "kind": "allow_once"},
-                                {"optionId": "deny", "name": "Deny", "kind": "reject_once"},
-                            ],
-                        }),
-                    });
+                        );
+                        out.push(PeerEvent::Request {
+                            id: Value::String(acp_req_id),
+                            method: "elicitation/create".into(),
+                            params,
+                        });
+                    } else {
+                        let (acp_kind, title) = claude_tool_summary(tool_name, &input);
+                        self.pending_control_requests.insert(
+                            acp_req_id.clone(),
+                            PendingClaudeRequest::Permission { request_id: request_id.to_owned() },
+                        );
+                        out.push(PeerEvent::Request {
+                            id: Value::String(acp_req_id),
+                            method: "session/request_permission".into(),
+                            params: json!({
+                                "toolCall": {
+                                    "title": title,
+                                    "kind": acp_kind,
+                                    "rawInput": input,
+                                },
+                                "options": [
+                                    {"optionId": "allow", "name": "Allow", "kind": "allow_once"},
+                                    {"optionId": "deny", "name": "Deny", "kind": "reject_once"},
+                                ],
+                            }),
+                        });
+                    }
                 }
             }
             _ => {}
@@ -619,26 +654,11 @@ impl JsonRpcPeer for ClaudeStreamJsonPeer {
 
     fn reply(&mut self, id: Value, result: Result<Value, JsonRpcError>) {
         let Some(acp_req_id) = id.as_str() else { return };
-        let Some(request_id) = lock(&self.translator).pending_control_requests.remove(acp_req_id) else {
+        let Some(pending) = lock(&self.translator).pending_control_requests.remove(acp_req_id) else {
             return;
         };
-        let allowed = result.ok().is_some_and(|v| {
-            v.get("outcome")
-                .and_then(|o| o.get("optionId"))
-                .and_then(Value::as_str)
-                .is_some_and(|id| id == "allow")
-        });
-        let behavior = if allowed { "allow" } else { "deny" };
-        self.child.write_json(&json!({
-            "type": "control_response",
-            "response": {
-                "subtype": "success",
-                "request_id": request_id,
-                "response": {
-                    "behavior": behavior,
-                },
-            }
-        }));
+        let payload = claude_control_response(pending, result);
+        self.child.write_json(&payload);
     }
 
     fn terminate(&mut self) {
@@ -942,6 +962,139 @@ fn extract_prompt_text(params: &Value) -> String {
         .unwrap_or_default()
 }
 
+fn claude_ask_user_question_to_elicitation(input: &Value) -> Option<(Value, Vec<(String, String)>)> {
+    let raw_questions = input.get("questions").and_then(Value::as_array)?;
+    if raw_questions.is_empty() {
+        return None;
+    }
+    let mut properties = Map::new();
+    let mut questions = Vec::new();
+    for (index, q) in raw_questions.iter().enumerate() {
+        let Some(question_text) = q.get("question").and_then(Value::non_empty_string) else { continue };
+        let key = format!("q{index}");
+        questions.push((key.clone(), question_text.to_owned()));
+        let header = q.get("header").and_then(Value::non_empty_string);
+        let multi = q.get("multiSelect").and_then(Value::as_bool).unwrap_or(false);
+        let options: Vec<Value> = q
+            .get("options")
+            .and_then(Value::as_array)
+            .map(|opts| {
+                opts.iter()
+                    .filter_map(|o| {
+                        let label = o.get("label").and_then(Value::non_empty_string)?;
+                        let mut item = Map::new();
+                        item.insert("const".into(), Value::String(label.to_owned()));
+                        item.insert("title".into(), Value::String(label.to_owned()));
+                        if let Some(desc) = o.get("description").and_then(Value::non_empty_string) {
+                            item.insert("description".into(), Value::String(desc.to_owned()));
+                        }
+                        Some(Value::Object(item))
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        let mut prop = Map::new();
+        prop.insert("title".into(), Value::String(question_text.to_owned()));
+        if let Some(header) = header {
+            prop.insert("description".into(), Value::String(header.to_owned()));
+        }
+        if multi {
+            prop.insert("type".into(), Value::String("array".into()));
+            prop.insert("items".into(), json!({"anyOf": options}));
+        } else {
+            prop.insert("type".into(), Value::String("string".into()));
+            if !options.is_empty() {
+                prop.insert("oneOf".into(), Value::Array(options));
+            }
+        }
+        properties.insert(key.clone(), Value::Object(prop));
+        properties.insert(format!("{key}__other"), json!({"type": "string"}));
+    }
+    if questions.is_empty() {
+        return None;
+    }
+    let params = json!({
+        "mode": "form",
+        "message": "Input requested",
+        "requestedSchema": {
+            "type": "object",
+            "properties": Value::Object(properties),
+        },
+    });
+    Some((params, questions))
+}
+
+fn claude_control_response(pending: PendingClaudeRequest, result: Result<Value, JsonRpcError>) -> Value {
+    match pending {
+        PendingClaudeRequest::Permission { request_id } => {
+            let allowed = result.ok().is_some_and(|v| {
+                v.get("outcome")
+                    .and_then(|o| o.get("optionId"))
+                    .and_then(Value::as_str)
+                    .is_some_and(|id| id == "allow")
+            });
+            let behavior = if allowed { "allow" } else { "deny" };
+            json!({
+                "type": "control_response",
+                "response": {
+                    "subtype": "success",
+                    "request_id": request_id,
+                    "response": {
+                        "behavior": behavior,
+                    },
+                }
+            })
+        }
+        PendingClaudeRequest::Question { request_id, original_input, questions } => {
+            if let Ok(value) = result
+                && value.get("action").and_then(Value::as_str) == Some("accept")
+                && let Some(content) = value.get("content").and_then(Value::as_object)
+            {
+                let mut answers = Map::new();
+                for (key, question_text) in &questions {
+                    let other_key = format!("{key}__other");
+                    let answer =
+                        if let Some(other) = content.get(&other_key).and_then(Value::non_empty_string) {
+                            other.to_owned()
+                        } else if let Some(val) = content.get(key).and_then(Value::as_str) {
+                            val.to_owned()
+                        } else if let Some(arr) = content.get(key).and_then(Value::as_array) {
+                            arr.iter().filter_map(Value::as_str).collect::<Vec<_>>().join(", ")
+                        } else {
+                            String::new()
+                        };
+                    answers.insert(question_text.clone(), Value::String(answer));
+                }
+                let mut updated = original_input.as_object().cloned().unwrap_or_default();
+                updated.insert("answers".into(), Value::Object(answers));
+                json!({
+                    "type": "control_response",
+                    "response": {
+                        "subtype": "success",
+                        "request_id": request_id,
+                        "response": {
+                            "behavior": "allow",
+                            "updatedInput": Value::Object(updated),
+                        },
+                    }
+                })
+            } else {
+                json!({
+                    "type": "control_response",
+                    "response": {
+                        "subtype": "success",
+                        "request_id": request_id,
+                        "response": {
+                            "behavior": "deny",
+                            "message": "User dismissed the question",
+                        },
+                    }
+                })
+            }
+        }
+    }
+}
+
 fn emit_update(sink: &PeerSink, session_id: &str, update: Value) {
     sink.send(PeerEvent::Notification {
         method: "session/update".into(),
@@ -1072,5 +1225,74 @@ mod tests {
         assert_eq!(a.len(), 36);
         assert_ne!(a, b);
         assert_eq!(&a[14..15], "4");
+    }
+
+    #[test]
+    fn claude_ask_user_question_translates_to_elicitation_and_replies_with_updated_input() {
+        let mut tr = ClaudeStreamTranslator::new("sess-1");
+        let control = json!({
+            "type": "control_request",
+            "request_id": "req-9",
+            "request": {
+                "subtype": "can_use_tool",
+                "tool_name": "AskUserQuestion",
+                "input": {
+                    "questions": [
+                        {
+                            "header": "Storage",
+                            "question": "Which database?",
+                            "multiSelect": false,
+                            "options": [
+                                {"label": "SQLite", "description": "Embedded file"},
+                                {"label": "Postgres", "description": "Server"}
+                            ]
+                        },
+                        {
+                            "header": "Targets",
+                            "question": "Which OSes?",
+                            "multiSelect": true,
+                            "options": [
+                                {"label": "macOS"},
+                                {"label": "Linux"}
+                            ]
+                        }
+                    ]
+                }
+            }
+        });
+        let events = tr.handle_message(&control);
+        assert_eq!(events.len(), 1);
+        let PeerEvent::Request { id, method, params } = &events[0] else { panic!("expected request") };
+        assert_eq!(method, "elicitation/create");
+        let question = crate::AgentChatQuestion::new(
+            params["message"].as_str().unwrap_or(""),
+            &params["requestedSchema"],
+        )
+        .expect("parsed question");
+        assert_eq!(question.fields.len(), 2);
+        assert_eq!(question.fields[0].choices[0].label, "SQLite");
+        assert_eq!(question.fields[0].choices[0].detail.as_deref(), Some("Embedded file"));
+        assert!(question.fields[1].allows_multiple);
+
+        let pending = tr.pending_control_requests.remove(id.as_str().unwrap()).expect("pending");
+        let response = claude_control_response(
+            pending,
+            Ok(json!({
+                "action": "accept",
+                "content": {
+                    "q0": "SQLite",
+                    "q1": ["macOS", "Linux"]
+                }
+            })),
+        );
+        assert_eq!(response["response"]["request_id"], "req-9");
+        assert_eq!(response["response"]["response"]["behavior"], "allow");
+        assert_eq!(
+            response["response"]["response"]["updatedInput"]["answers"],
+            json!({
+                "Which database?": "SQLite",
+                "Which OSes?": "macOS, Linux"
+            })
+        );
     }
 }

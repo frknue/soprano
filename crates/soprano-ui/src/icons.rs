@@ -151,6 +151,7 @@ icon_names! {
     Server => "server",
     Settings => "settings",
     Shield => "shield",
+    ShieldAlert => "shield-alert",
     ShieldQuestionMark => "shield-question-mark",
     Sidebar => "sidebar",
     Sparkles => "sparkles",

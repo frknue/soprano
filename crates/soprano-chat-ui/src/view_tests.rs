@@ -998,3 +998,47 @@ fn pasted_images_and_files_in_the_chat_composer_become_attachments(cx: &mut Test
     cx.update(|_, cx| chat.view.update(cx, |view, cx| view.close(cx)));
     assert!(!unsent[0].path.exists());
 }
+
+#[gpui::test]
+fn at_mentions_list_project_files_and_tab_inserts_the_highlighted_path(cx: &mut TestAppContext) {
+    let (chat, cx) = open_chat(cx);
+    chat.start(cx);
+    cx.simulate_resize(gpui::size(px(1000.), px(700.)));
+    settle(cx);
+
+    cx.update(|_, cx| {
+        let composer = chat.view.read(cx).composer().clone();
+        composer.update(cx, |composer, cx| {
+            composer.set_project_files(
+                vec![
+                    "README.md".into(),
+                    "crates/soprano-chat-ui/src/composer.rs".into(),
+                    "crates/soprano-chat-ui/src/mentions.rs".into(),
+                ],
+                cx,
+            );
+        });
+    });
+
+    // Orca-style attach button and context bar are rendered.
+    assert!(cx.debug_bounds("composer-attach").is_some());
+    assert!(cx.debug_bounds("chat-composer-context").is_some());
+
+    chat.type_text("Look at @comp", cx);
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("composer-mention-menu").is_some());
+
+    cx.simulate_keystrokes("tab");
+    cx.run_until_parked();
+    assert_eq!(chat.composer_text(cx), "Look at @crates/soprano-chat-ui/src/composer.rs ");
+    assert!(cx.debug_bounds("composer-mention-menu").is_none());
+
+    // Escape dismisses an open `@` menu without clearing the typed text.
+    chat.type_text("@ment", cx);
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("composer-mention-menu").is_some());
+    cx.simulate_keystrokes("escape");
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("composer-mention-menu").is_none());
+    assert_eq!(chat.composer_text(cx), "Look at @crates/soprano-chat-ui/src/composer.rs @ment");
+}

@@ -10,13 +10,14 @@ use std::cell::Cell;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::rc::Rc;
-use std::time::{Duration, SystemTime};
+use std::time::{Duration, Instant, SystemTime};
 
 use futures::StreamExt as _;
 use gpui::{
     App, AppContext as _, Bounds, ClipboardEntry, ClipboardItem, Context, DismissEvent, Entity, EventEmitter,
-    FocusHandle, Focusable, InteractiveElement, IntoElement, Keystroke, MouseButton, ParentElement, Pixels,
-    Render, ScrollHandle, Styled, Subscription, Task, Window, canvas, div, point, px,
+    FocusHandle, Focusable, InteractiveElement, IntoElement, Keystroke, MouseButton, ParentElement,
+    PathPromptOptions, Pixels, Render, ScrollHandle, Styled, Subscription, Task, Window, canvas, div, point,
+    px,
 };
 use gpui_component::input::{Enter, InputEvent, InputState, TextareaState};
 use soprano_agents::{
@@ -24,6 +25,9 @@ use soprano_agents::{
 };
 use soprano_chat::AgentChatConfigOption;
 use soprano_chat_ui::composer_logic::option_title;
+use soprano_chat_ui::mentions::{
+    ComposerContextInfo, MENTION_ROW_LIMIT, MentionMenu, MentionToken, list_project_files, matching_files,
+};
 use soprano_chat_ui::timeline_view::{gutter, lane_width};
 use soprano_chat_ui::{TimelineSource, TimelineView, TranscriptSource};
 use soprano_model::Workspace;
@@ -226,6 +230,16 @@ pub struct AgentDashboard {
     attachments: Vec<Attachment>,
     /// Why the last pasted image is not among them.
     attach_error: Option<String>,
+    /// The `@` file-mention menu while it shows over the composer.
+    mention: Option<MentionMenu>,
+    mention_scroll: ScrollHandle,
+    mention_dismissed: bool,
+    project_files: Vec<String>,
+    project_files_root: Option<PathBuf>,
+    project_files_loaded_at: Option<Instant>,
+    file_index_task: Option<Task<()>>,
+    /// Cached host, folder, checkout kind, and git branch shown beneath the composer card.
+    composer_context: ComposerContextInfo,
     draft: Option<Draft>,
     /// The last message could not be delivered: the status and availability it failed under;
     /// either changing clears it.
@@ -308,14 +322,21 @@ impl AgentDashboard {
                 }
                 cx.notify();
             }),
-            cx.subscribe_in(&editor, window, |this, _, event: &InputEvent, _, cx| {
+            cx.subscribe_in(&editor, window, |this, _, event: &InputEvent, window, cx| {
                 // Typing again puts the status hint back in place of "Could not send".
-                if matches!(event, InputEvent::Change) {
-                    this.send_failed = None;
-                    this.attach_error = None;
-                    if let Some(draft) = &mut this.draft {
-                        draft.error = None;
+                match event {
+                    InputEvent::Change => {
+                        this.send_failed = None;
+                        this.attach_error = None;
+                        if let Some(draft) = &mut this.draft {
+                            draft.error = None;
+                        }
+                        this.sync_mention_menu(window, cx);
                     }
+                    InputEvent::Blur => {
+                        this.mention = None;
+                    }
+                    _ => {}
                 }
                 cx.notify();
             }),
@@ -356,6 +377,14 @@ impl AgentDashboard {
             editor,
             attachments: Vec::new(),
             attach_error: None,
+            mention: None,
+            mention_scroll: ScrollHandle::new(),
+            mention_dismissed: false,
+            project_files: Vec::new(),
+            project_files_root: None,
+            project_files_loaded_at: None,
+            file_index_task: None,
+            composer_context: ComposerContextInfo::default(),
             draft: None,
             send_failed: None,
             detail_id: None,
@@ -448,6 +477,7 @@ impl AgentDashboard {
         self.track_transcripts();
         self.draft_when_empty(window, cx);
         self.sync_detail(window, cx);
+        self.refresh_composer_context();
         if selection_moved {
             self.scroll_selection_into_view();
         }
@@ -578,6 +608,7 @@ impl AgentDashboard {
         let enabled = self.composer_enabled();
         let _ = window;
         self.editor.update(cx, |editor, cx| editor.set_disabled(!enabled, cx));
+        self.refresh_composer_context();
     }
 
     /// Hands the transcript to the timeline as turns; the last one runs while the agent works.
@@ -848,6 +879,182 @@ impl AgentDashboard {
         self.editor.update(cx, |editor, cx| editor.set_value("", window, cx));
         self.attachments.drain(..).for_each(Attachment::discard);
         self.attach_error = None;
+        self.mention = None;
+        self.mention_dismissed = false;
+    }
+
+    /// Opens the OS file dialog to attach one or more files/images (`+` button).
+    pub(super) fn open_file_picker(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.composer_enabled() {
+            return;
+        }
+        let receiver = cx.prompt_for_paths(PathPromptOptions {
+            files: true,
+            directories: false,
+            multiple: true,
+            prompt: Some("Attach files".into()),
+        });
+        cx.spawn_in(window, async move |this, cx| {
+            if let Ok(Ok(Some(paths))) = receiver.await {
+                let _ = this.update_in(cx, |this, window, cx| {
+                    this.attach_files(paths, cx);
+                    this.focus_composer(window, cx);
+                });
+            }
+        })
+        .detach();
+    }
+
+    /// Populates the `@` file-mention candidate list directly (also used in tests).
+    pub fn set_project_files(&mut self, files: Vec<String>, cx: &mut Context<Self>) {
+        self.project_files = files;
+        self.project_files_root = self.active_composer_cwd().map(|(cwd, _)| cwd);
+        self.project_files_loaded_at = Some(Instant::now());
+        cx.notify();
+    }
+
+    fn active_composer_cwd(&self) -> Option<(PathBuf, Option<String>)> {
+        if let Some(draft) = &self.draft {
+            return Some((PathBuf::from(&draft.project.path), None));
+        }
+        let entry = self.selected()?;
+        let cwd = entry.entry.cwd.as_deref()?;
+        Some((PathBuf::from(cwd), entry.entry.machine.clone()))
+    }
+
+    fn refresh_composer_context(&mut self) {
+        self.composer_context = match self.active_composer_cwd() {
+            Some((cwd, machine)) => ComposerContextInfo::from_cwd(&cwd, machine.as_deref()),
+            None => ComposerContextInfo::default(),
+        };
+    }
+
+    fn ensure_project_files(&mut self, cx: &mut Context<Self>) {
+        let Some((cwd, _)) = self.active_composer_cwd() else { return };
+        let fresh = self.project_files_root.as_ref() == Some(&cwd)
+            && self.project_files_loaded_at.is_some_and(|at| at.elapsed() < Duration::from_secs(10));
+        if fresh || self.file_index_task.is_some() {
+            return;
+        }
+        let target_cwd = cwd.clone();
+        self.file_index_task = Some(cx.spawn(async move |this, cx| {
+            let files = cx.background_executor().spawn(async move { list_project_files(&target_cwd) }).await;
+            let _ = this.update(cx, |this, cx| {
+                this.project_files = files;
+                this.project_files_root = Some(cwd);
+                this.project_files_loaded_at = Some(Instant::now());
+                this.file_index_task = None;
+                cx.notify();
+            });
+        }));
+    }
+
+    pub(super) fn sync_mention_menu(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.composer_enabled() {
+            self.mention = None;
+            return;
+        }
+        let (text, selection) = {
+            let editor = self.editor.read(cx);
+            (editor.value().to_string(), editor.selected_range())
+        };
+        let token = selection.is_empty().then(|| MentionToken::at(&text, selection.start)).flatten();
+        let Some(token) = token else {
+            self.mention_dismissed = false;
+            self.mention = None;
+            return;
+        };
+        let focused = self.editor.focus_handle(cx).is_focused(window);
+        if self.mention_dismissed || !focused {
+            self.mention = None;
+            return;
+        }
+        self.ensure_project_files(cx);
+        let matches: Vec<String> = matching_files(&self.project_files, &token.query, MENTION_ROW_LIMIT)
+            .into_iter()
+            .map(str::to_owned)
+            .collect();
+        let kept = match &self.mention {
+            Some(menu) if menu.token == token => menu.highlighted_path.clone(),
+            _ => None,
+        };
+        let highlighted = kept
+            .and_then(|path| matches.iter().position(|candidate| candidate == &path))
+            .or((!matches.is_empty()).then_some(0));
+        let changed =
+            self.mention.as_ref().is_none_or(|menu| menu.token != token || menu.highlighted != highlighted);
+        self.mention = Some(MentionMenu {
+            token,
+            highlighted,
+            highlighted_path: highlighted.and_then(|h| matches.get(h)).cloned(),
+        });
+        if changed && let Some(index) = highlighted {
+            self.mention_scroll.scroll_to_item(index);
+        }
+    }
+
+    pub(super) fn shown_mentions(&self) -> Vec<String> {
+        match &self.mention {
+            Some(menu) => matching_files(&self.project_files, &menu.token.query, MENTION_ROW_LIMIT)
+                .into_iter()
+                .map(str::to_owned)
+                .collect(),
+            None => Vec::new(),
+        }
+    }
+
+    pub(super) fn set_mention_highlight(&mut self, index: usize, cx: &mut Context<Self>) {
+        let path = self.shown_mentions().get(index).cloned();
+        if let Some(menu) = self.mention.as_mut() {
+            menu.highlighted = Some(index);
+            menu.highlighted_path = path;
+            self.mention_scroll.scroll_to_item(index);
+            cx.notify();
+        }
+    }
+
+    fn move_mention_highlight(&mut self, delta: isize, cx: &mut Context<Self>) {
+        let count = self.shown_mentions().len();
+        if count == 0 {
+            return;
+        }
+        let current = self.mention.as_ref().and_then(|m| m.highlighted);
+        let current = current.map_or(if delta > 0 { -1 } else { count as isize }, |h| h as isize);
+        self.set_mention_highlight((current + delta).clamp(0, count as isize - 1) as usize, cx);
+    }
+
+    pub(super) fn insert_mention(&mut self, path: &str, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(menu) = self.mention.take() else { return };
+        let text = self.editor.read(cx).value().to_string();
+        let (range, insert) = menu.token.replacement(path, &text);
+        let mut edited = String::with_capacity(text.len() + insert.len());
+        edited.push_str(&text[..range.start]);
+        edited.push_str(&insert);
+        edited.push_str(&text[range.end.min(text.len())..]);
+        let caret = range.start + insert.len();
+        self.editor.update(cx, |editor, cx| {
+            editor.set_value(edited, window, cx);
+            editor.set_selected_range(caret..caret, cx);
+        });
+        self.mention_dismissed = true;
+        self.focus_composer(window, cx);
+        cx.notify();
+    }
+
+    fn choose_highlighted_mention(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        let mentions = self.shown_mentions();
+        let Some(path) = self.mention.as_ref().and_then(|m| m.highlighted).and_then(|h| mentions.get(h))
+        else {
+            return false;
+        };
+        self.insert_mention(path, window, cx);
+        true
+    }
+
+    fn dismiss_mention_menu(&mut self, cx: &mut Context<Self>) {
+        self.mention_dismissed = true;
+        self.mention = None;
+        cx.notify();
     }
 
     // MARK: - New thread
@@ -928,6 +1135,7 @@ impl AgentDashboard {
         draft.project = ProjectChoice::at(path);
         draft.error = None;
         self.read_draft_window(cx);
+        self.refresh_composer_context();
         self.focus_composer(window, cx);
         cx.notify();
     }
@@ -1228,6 +1436,40 @@ impl AgentDashboard {
         } else {
             KeyFocus::List
         };
+        if focus == KeyFocus::Composer
+            && self.mention.is_some()
+            && !keystroke.modifiers.platform
+            && !keystroke.modifiers.control
+            && !keystroke.modifiers.alt
+        {
+            match keystroke.key.as_str() {
+                "escape" => {
+                    self.dismiss_mention_menu(cx);
+                    return true;
+                }
+                "up" => {
+                    self.move_mention_highlight(-1, cx);
+                    return true;
+                }
+                "down" => {
+                    self.move_mention_highlight(1, cx);
+                    return true;
+                }
+                "tab" => {
+                    if !self.choose_highlighted_mention(window, cx) {
+                        self.dismiss_mention_menu(cx);
+                    }
+                    return true;
+                }
+                "enter" if !keystroke.modifiers.shift => {
+                    if !self.choose_highlighted_mention(window, cx) {
+                        self.dismiss_mention_menu(cx);
+                    }
+                    return true;
+                }
+                _ => {}
+            }
+        }
         let Some(action) = key_action(keystroke, focus) else { return false };
         self.perform(action, window, cx);
         true

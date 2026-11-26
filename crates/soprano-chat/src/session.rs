@@ -147,6 +147,10 @@ impl AgentChatPermission {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct QuestionChoice {
+    /// The wire value returned in the elicitation `content` (`const` or `enum` entry).
+    pub value: String,
+    /// The human-readable label shown to the user (`title` or `enumNames`, falling back to
+    /// `value`).
     pub label: String,
     pub detail: Option<String>,
 }
@@ -176,39 +180,21 @@ impl AgentChatQuestion {
     /// person could answer.
     pub fn new(message: &str, schema: &Value) -> Option<Self> {
         let properties = schema.get("properties")?.as_object()?;
-        let mut keys: Vec<&String> = properties.keys().filter(|k| !k.ends_with("__other")).collect();
+        let is_companion_other = |k: &str| {
+            k.strip_suffix("__other")
+                .or_else(|| k.strip_suffix("_other"))
+                .is_some_and(|base| properties.contains_key(base))
+        };
+        let mut keys: Vec<&String> = properties.keys().filter(|k| !is_companion_other(k.as_str())).collect();
         keys.sort_by(|a, b| numeric_order(a, b));
         let mut fields = Vec::new();
         for key in keys {
             let property = &properties[key.as_str()];
             let is_array = property.get("type").and_then(Value::as_str) == Some("array");
-            let options = if is_array {
-                property.get("items").and_then(|i| i.get("anyOf")).and_then(Value::as_array)
-            } else {
-                property.get("oneOf").and_then(Value::as_array)
-            };
-            let choices: Vec<QuestionChoice> = options
-                .map(|options| {
-                    options
-                        .iter()
-                        .filter_map(|option| {
-                            let label = option
-                                .get("const")
-                                .and_then(Value::as_str)
-                                .or_else(|| option.get("title").and_then(Value::as_str))?;
-                            Some(QuestionChoice {
-                                label: label.to_owned(),
-                                detail: option
-                                    .get("description")
-                                    .and_then(Value::non_empty_string)
-                                    .map(str::to_owned),
-                            })
-                        })
-                        .collect()
-                })
-                .unwrap_or_default();
-            let other = format!("{key}__other");
-            let other_key = properties.contains_key(&other).then_some(other);
+            let choices = parse_choices(property, is_array);
+            let other_key = [format!("{key}__other"), format!("{key}_other")]
+                .into_iter()
+                .find(|candidate| properties.contains_key(candidate));
             if choices.is_empty()
                 && other_key.is_none()
                 && property.get("type").and_then(Value::as_str) != Some("string")
@@ -216,6 +202,12 @@ impl AgentChatQuestion {
                 continue;
             }
             let other_key = other_key.or_else(|| choices.is_empty().then(|| key.clone()));
+            let recommended = property.get("default").and_then(Value::as_str).map(|raw| {
+                choices
+                    .iter()
+                    .find(|c| c.value == raw || c.label == raw)
+                    .map_or_else(|| raw.to_owned(), |c| c.label.clone())
+            });
             fields.push(QuestionField {
                 key: key.clone(),
                 title: property.get("title").and_then(Value::non_empty_string).unwrap_or(message).to_owned(),
@@ -223,7 +215,7 @@ impl AgentChatQuestion {
                 choices,
                 allows_multiple: is_array,
                 other_key,
-                recommended: property.get("default").and_then(Value::as_str).map(str::to_owned),
+                recommended,
             });
         }
         if fields.is_empty() {
@@ -258,51 +250,126 @@ impl AgentChatQuestion {
         }
     }
 
-    /// The form's content for answers by question id ([`user_input_request`]): chosen labels,
-    /// or a typed answer under the field's `other_key`.
+    /// The form's content for answers by question id ([`user_input_request`]): chosen choices
+    /// mapped back to their wire `value` (`const` / `enum`), or a typed answer under the field's
+    /// `other_key`.
     ///
     /// [`user_input_request`]: Self::user_input_request
     pub fn content(&self, answers: &BTreeMap<String, Vec<String>>) -> Map<String, Value> {
         let mut content = Map::new();
         for field in &self.fields {
             let values = answers.get(&field.key).cloned().unwrap_or_default();
-            let is_label = |value: &str| field.choices.iter().any(|c| c.label == value);
+            let choice_of =
+                |picked: &str| field.choices.iter().find(|c| c.label == picked || c.value == picked);
             if let Some(other_key) = &field.other_key
                 && values.len() == 1
-                && !is_label(&values[0])
+                && choice_of(&values[0]).is_none()
             {
                 if *other_key != field.key && field.allows_multiple {
                     content.insert(field.key.clone(), Value::Array(Vec::new()));
                 }
                 content.insert(other_key.clone(), Value::String(values[0].clone()));
             } else if field.allows_multiple {
-                content
-                    .insert(field.key.clone(), Value::Array(values.into_iter().map(Value::String).collect()));
+                let mapped = values
+                    .into_iter()
+                    .map(|v| choice_of(&v).map_or(v, |c| c.value.clone()))
+                    .map(Value::String)
+                    .collect();
+                content.insert(field.key.clone(), Value::Array(mapped));
             } else if let Some(value) = values.into_iter().next() {
-                content.insert(field.key.clone(), Value::String(value));
+                let wire = choice_of(&value).map_or(value, |c| c.value.clone());
+                content.insert(field.key.clone(), Value::String(wire));
             }
         }
         content
     }
 
-    /// What the content answers, by question id, as the timeline shows it.
+    /// What the content answers, by question id, as the timeline shows it (wire values mapped
+    /// back to their human-readable labels).
     pub fn answers(&self, content: &Map<String, Value>) -> BTreeMap<String, Vec<String>> {
         let mut answers = BTreeMap::new();
         for field in &self.fields {
+            let display_of = |wire: &str| {
+                field
+                    .choices
+                    .iter()
+                    .find(|c| c.value == wire || c.label == wire)
+                    .map_or_else(|| wire.to_owned(), |c| c.label.clone())
+            };
             if let Some(typed) =
                 field.other_key.as_ref().and_then(|k| content.get(k)).and_then(Value::non_empty_string)
             {
                 answers.insert(field.key.clone(), vec![typed.to_owned()]);
             } else if let Some(value) = content.get(&field.key).and_then(Value::as_str) {
-                answers.insert(field.key.clone(), vec![value.to_owned()]);
+                answers.insert(field.key.clone(), vec![display_of(value)]);
             } else if let Some(values) = content.get(&field.key).and_then(Value::as_array) {
                 answers.insert(
                     field.key.clone(),
-                    values.iter().filter_map(Value::as_str).map(str::to_owned).collect(),
+                    values.iter().filter_map(Value::as_str).map(display_of).collect(),
                 );
             }
         }
         answers
+    }
+}
+
+/// Extracts choices from any JSON Schema / MCP / ACP elicitation enum encoding:
+/// - Single-select titled: `oneOf` or `anyOf` with `{ "const", "title", "description"? }`
+/// - Multi-select titled: `items.anyOf` or `items.oneOf` with `{ "const", "title", "description"? }`
+/// - Single- or multi-select untitled / legacy titled: `enum` (or `items.enum`) with optional
+///   parallel `enumNames`
+fn parse_choices(property: &Value, is_array: bool) -> Vec<QuestionChoice> {
+    let container = if is_array { property.get("items").unwrap_or(&Value::Null) } else { property };
+    let titled = if is_array {
+        container.get("anyOf").or_else(|| container.get("oneOf")).and_then(Value::as_array)
+    } else {
+        container.get("oneOf").or_else(|| container.get("anyOf")).and_then(Value::as_array)
+    };
+    if let Some(options) = titled {
+        let choices: Vec<QuestionChoice> = options
+            .iter()
+            .filter_map(|option| {
+                let wire = option.get("const").and_then(scalar_string);
+                let title = option.get("title").and_then(Value::non_empty_string).map(str::to_owned);
+                let label = title.clone().or_else(|| wire.clone())?;
+                let value = wire.or(title)?;
+                let detail = option
+                    .get("description")
+                    .and_then(Value::non_empty_string)
+                    .filter(|d| *d != label)
+                    .map(str::to_owned);
+                Some(QuestionChoice { value, label, detail })
+            })
+            .collect();
+        if !choices.is_empty() {
+            return choices;
+        }
+    }
+    let Some(enum_values) = container.get("enum").and_then(Value::as_array) else {
+        return Vec::new();
+    };
+    let enum_names =
+        container.get("enumNames").or_else(|| property.get("enumNames")).and_then(Value::as_array);
+    enum_values
+        .iter()
+        .enumerate()
+        .filter_map(|(index, raw)| {
+            let value = scalar_string(raw)?;
+            let label = enum_names
+                .and_then(|names| names.get(index))
+                .and_then(Value::non_empty_string)
+                .map_or_else(|| value.clone(), str::to_owned);
+            Some(QuestionChoice { value, label, detail: None })
+        })
+        .collect()
+}
+
+fn scalar_string(value: &Value) -> Option<String> {
+    match value {
+        Value::String(s) if !s.is_empty() => Some(s.clone()),
+        Value::Number(n) => Some(n.to_string()),
+        Value::Bool(b) => Some(b.to_string()),
+        _ => None,
     }
 }
 

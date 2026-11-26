@@ -257,6 +257,11 @@ impl ChatView {
         self.composer.update(cx, |composer, _| composer.set_attachments_dir(folder));
     }
 
+    /// Sets the remote machine label shown in the composer's bottom metadata bar (`None` = local).
+    pub fn set_machine_name(&self, machine: Option<String>, cx: &mut App) {
+        self.composer.update(cx, |composer, cx| composer.set_machine_name(machine, cx));
+    }
+
     /// Attaches files to the composer (a drop onto the chat or from the file explorer) and
     /// focuses its editor.
     pub fn attach_files(

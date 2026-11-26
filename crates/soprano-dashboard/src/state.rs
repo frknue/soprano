@@ -480,7 +480,7 @@ pub fn draft_destination(window_title: Option<&str>) -> String {
 }
 
 /// What the composer asks for.
-pub const PLACEHOLDER: &str = "Ask anything";
+pub const PLACEHOLDER: &str = "Ask anything, @ to mention files";
 
 /// Whether the newest turn is still going ("Working for", Thinking). An agent that waits on
 /// the person shows its turn finished.

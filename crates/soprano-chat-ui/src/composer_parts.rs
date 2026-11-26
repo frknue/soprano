@@ -20,8 +20,9 @@ use crate::attachments::Attachment;
 use crate::composer::ComposerView;
 use crate::composer_logic::{
     ComposerPrimaryAction, ContextLevel, MODE_CATEGORY, MODEL_CATEGORY, THINKING_CATEGORY,
-    current_value_entry, model_title, option_of, option_title, slash_empty_text,
+    current_value_entry, option_of, option_title, slash_empty_text,
 };
+use crate::mentions::{is_bypass_permission_mode, split_mention_path};
 use crate::popovers::PopoverKind;
 use crate::widgets::text_size;
 use crate::work_log::timeline_icon;
@@ -322,65 +323,80 @@ impl ComposerView {
                         .text_color(t.foreground.opacity(0.85))
                         .child(question.question.clone()),
                 )
-                .child(div().mt(t.cz(6.0)).flex().flex_col().children(
-                    question.options.iter().enumerate().map(|(index, option)| {
-                        let is_checked = checked.contains(&option.label);
-                        let description =
-                            option.description.clone().filter(|d| !d.is_empty() && *d != option.label);
-                        div()
-                            .id(SharedString::from(format!("composer-option-{index}")))
-                            .px(t.cz(6.0))
-                            .py(t.cz(6.0))
-                            .pr(t.cz(4.0))
-                            .rounded(t.cz(6.0))
-                            .flex()
-                            .items_start()
-                            .gap(t.cz(10.0))
-                            .cursor_pointer()
-                            .when(!is_checked, |row| row.hover(|s| s.bg(t.hover)))
-                            .on_click(
-                                cx.listener(move |this, _, window, cx| this.toggle_option(index, window, cx)),
-                            )
-                            .child(div().pt(t.cz(2.0)).child(radio_mark(
-                                is_checked,
-                                question.allows_multiple,
-                                &t,
-                            )))
-                            .child(
-                                div()
-                                    .flex_1()
-                                    .min_w_0()
-                                    .flex()
-                                    .flex_col()
-                                    .gap(t.cz(2.0))
-                                    .child(text(
-                                        option.label.clone(),
-                                        text_size::BODY,
-                                        FontWeight::MEDIUM,
-                                        if is_checked { t.foreground } else { t.foreground.opacity(0.7) },
-                                        &t,
-                                    ))
-                                    .when_some(description, |texts, description| {
-                                        texts.child(
-                                            div()
-                                                .font_family(UI_FONT_FAMILY)
-                                                .text_size(t.cz(text_size::TINY))
-                                                .text_color(t.muted)
-                                                .child(description),
-                                        )
-                                    }),
-                            )
-                            .when(index < 9, |row| {
-                                row.child(
+                .child(
+                    div()
+                        .id("composer-question-options")
+                        .mt(t.cz(6.0))
+                        .max_h(t.cz(260.0))
+                        .overflow_y_scroll()
+                        .flex()
+                        .flex_col()
+                        .children(question.options.iter().enumerate().map(|(index, option)| {
+                            let is_checked = checked.contains(&option.label);
+                            let description =
+                                option.description.clone().filter(|d| !d.is_empty() && *d != option.label);
+                            div()
+                                .id(SharedString::from(format!("composer-option-{index}")))
+                                .px(t.cz(6.0))
+                                .py(t.cz(6.0))
+                                .pr(t.cz(4.0))
+                                .rounded(t.cz(6.0))
+                                .flex()
+                                .items_start()
+                                .gap(t.cz(10.0))
+                                .cursor_pointer()
+                                .when(!is_checked, |row| row.hover(|s| s.bg(t.hover)))
+                                .on_click(cx.listener(move |this, _, window, cx| {
+                                    this.toggle_option(index, window, cx)
+                                }))
+                                .child(div().pt(t.cz(2.0)).child(radio_mark(
+                                    is_checked,
+                                    question.allows_multiple,
+                                    &t,
+                                )))
+                                .child(
                                     div()
-                                        .w(t.cz(20.0))
+                                        .flex_1()
+                                        .min_w_0()
                                         .flex()
-                                        .justify_end()
-                                        .child(Keycaps::new([(index + 1).to_string()]).small()),
+                                        .flex_col()
+                                        .gap(t.cz(2.0))
+                                        .child(
+                                            div()
+                                                .min_w_0()
+                                                .font_family(UI_FONT_FAMILY)
+                                                .text_size(t.cz(text_size::BODY))
+                                                .font_weight(FontWeight::MEDIUM)
+                                                .text_color(if is_checked {
+                                                    t.foreground
+                                                } else {
+                                                    t.foreground.opacity(0.7)
+                                                })
+                                                .child(option.label.clone()),
+                                        )
+                                        .when_some(description, |texts, description| {
+                                            texts.child(
+                                                div()
+                                                    .min_w_0()
+                                                    .font_family(UI_FONT_FAMILY)
+                                                    .text_size(t.cz(text_size::TINY))
+                                                    .text_color(t.muted)
+                                                    .child(description),
+                                            )
+                                        }),
                                 )
-                            })
-                    }),
-                ))
+                                .when(index < 9, |row| {
+                                    row.child(
+                                        div()
+                                            .flex_none()
+                                            .w(t.cz(20.0))
+                                            .flex()
+                                            .justify_end()
+                                            .child(Keycaps::new([(index + 1).to_string()]).small()),
+                                    )
+                                })
+                        })),
+                )
                 .into_any_element(),
         )
     }
@@ -449,39 +465,99 @@ impl ComposerView {
 
     pub(crate) fn render_footer(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let t = cx.soprano_theme().clone();
+        let zoom = t.chat_zoom_factor();
         let compaction = self.chip_compaction();
         let running = self.session.borrow().is_running();
+        let can_attach = self.can_attach();
         let open = self.popover.as_ref().map(|p| p.kind);
         let options = self.session.borrow().config_options().to_vec();
         let anchors = self.anchors.clone();
 
+        let attach_button = div()
+            .id("composer-attach")
+            .debug_selector(|| "composer-attach".into())
+            .size(t.cz(28.0))
+            .rounded(t.cz(8.0))
+            .flex()
+            .flex_none()
+            .items_center()
+            .justify_center()
+            .tooltip(soprano_ui::tooltip("Attach files"))
+            .when(can_attach, |button| {
+                button
+                    .cursor_pointer()
+                    .hover(|s| s.bg(t.hover))
+                    .on_click(cx.listener(|this, _, window, cx| this.open_file_picker(window, cx)))
+            })
+            .when(!can_attach, |button| button.opacity(0.45))
+            .child(icon(IconName::Plus).size(15.0 * zoom).color(t.muted));
+
+        let permissions_chip = option_of(&options, MODE_CATEGORY).filter(|_| compaction < 2).map(|mode| {
+            let detail = current_value_entry(mode)
+                .and_then(|v| v.detail.clone())
+                .map(|d| format!(". {d}"))
+                .unwrap_or_default();
+            let tip = format!("{}: {}{detail}", mode.name, mode.current_name());
+            let bypass = is_bypass_permission_mode(&mode.current_value, mode.current_name());
+            let shield_icon = if bypass { IconName::ShieldAlert } else { IconName::Shield };
+            let shield_color = if bypass { t.approval } else { t.muted };
+            let anchors = anchors.clone();
+            div()
+                .id("composer-permissions")
+                .debug_selector(|| "composer-permissions".into())
+                .relative()
+                .h(t.cz(28.0))
+                .px(t.cz(7.0))
+                .rounded(t.cz(8.0))
+                .flex()
+                .flex_none()
+                .items_center()
+                .gap(t.cz(4.0))
+                .when(open == Some(PopoverKind::Permissions), |chip| chip.bg(t.hover))
+                .when(running, |chip| {
+                    chip.cursor_pointer().hover(|s| s.bg(t.hover)).on_click(cx.listener(
+                        |this, _, window, cx| this.toggle_popover(PopoverKind::Permissions, window, cx),
+                    ))
+                })
+                .when(!running, |chip| chip.opacity(0.55))
+                .tooltip(soprano_ui::tooltip(tip))
+                .child(icon(shield_icon).size(14.0 * zoom).color(shield_color))
+                .child(icon(IconName::ChevronDown).size(11.0 * zoom).color(t.muted))
+                .child(
+                    canvas(move |bounds, _, _| anchors.permissions.set(bounds), |_, _, _, _| {})
+                        .absolute()
+                        .size_full(),
+                )
+        });
+
+        let has_thinking = option_of(&options, THINKING_CATEGORY).filter(|_| compaction < 1).is_some();
         let model_chip = option_of(&options, MODEL_CATEGORY).map(|model| {
             let value = current_value_entry(model);
             let title = (compaction < 3)
-                .then(|| value.map(model_title).unwrap_or_else(|| model.current_value.clone()));
+                .then(|| value.map(|v| v.name.clone()).unwrap_or_else(|| model.current_value.clone()));
             let tip = format!("Model: {}", value.map_or(model.current_value.as_str(), |v| v.name.as_str()));
             let anchors = anchors.clone();
-            chip(
-                "composer-model",
-                title,
-                Some(agent_glyph(16.0, t.muted, &t).into_any_element()),
-                false,
-                open == Some(PopoverKind::Model),
-                running,
-                &t,
-            )
-            .pl(t.cz(6.0))
-            .tooltip(soprano_ui::tooltip(tip))
-            .on_click(cx.listener(|this, _, window, cx| this.toggle_popover(PopoverKind::Model, window, cx)))
-            .child(
-                canvas(move |bounds, _, _| anchors.model.set(bounds), |_, _, _, _| {}).absolute().size_full(),
-            )
+            chip("composer-model", title, None, false, open == Some(PopoverKind::Model), running, &t)
+                .when(!has_thinking, |c| {
+                    c.child(icon(IconName::ChevronDown).size(11.0 * zoom).color(t.muted))
+                })
+                .tooltip(soprano_ui::tooltip(tip))
+                .on_click(
+                    cx.listener(|this, _, window, cx| this.toggle_popover(PopoverKind::Model, window, cx)),
+                )
+                .child(
+                    canvas(move |bounds, _, _| anchors.model.set(bounds), |_, _, _, _| {})
+                        .absolute()
+                        .size_full(),
+                )
         });
         let traits_chip = option_of(&options, THINKING_CATEGORY).filter(|_| compaction < 1).map(|thinking| {
             let title = option_title(thinking.current_name());
             let tip = format!("{}: {title}", thinking.name);
             let anchors = anchors.clone();
             chip("composer-traits", Some(title), None, true, open == Some(PopoverKind::Traits), running, &t)
+                .pl(t.cz(4.0))
+                .child(icon(IconName::ChevronDown).size(11.0 * zoom).color(t.muted))
                 .tooltip(soprano_ui::tooltip(tip))
                 .on_click(
                     cx.listener(|this, _, window, cx| this.toggle_popover(PopoverKind::Traits, window, cx)),
@@ -492,34 +568,6 @@ impl ComposerView {
                         .size_full(),
                 )
         });
-        let permissions_chip = option_of(&options, MODE_CATEGORY).filter(|_| compaction < 2).map(|mode| {
-            let detail = current_value_entry(mode)
-                .and_then(|v| v.detail.clone())
-                .map(|d| format!(". {d}"))
-                .unwrap_or_default();
-            let tip = format!("{}: {}{detail}", mode.name, mode.current_name());
-            let anchors = anchors.clone();
-            chip(
-                "composer-permissions",
-                Some(mode.current_name().to_owned()),
-                Some(
-                    icon(IconName::Lock).size(13.0 * t.chat_zoom_factor()).color(t.muted).into_any_element(),
-                ),
-                false,
-                open == Some(PopoverKind::Permissions),
-                running,
-                &t,
-            )
-            .tooltip(soprano_ui::tooltip(tip))
-            .on_click(
-                cx.listener(|this, _, window, cx| this.toggle_popover(PopoverKind::Permissions, window, cx)),
-            )
-            .child(
-                canvas(move |bounds, _, _| anchors.permissions.set(bounds), |_, _, _, _| {})
-                    .absolute()
-                    .size_full(),
-            )
-        });
 
         div()
             .px(t.cz(8.0))
@@ -529,9 +577,11 @@ impl ComposerView {
                     .h(t.cz(32.0))
                     .flex()
                     .items_center()
-                    .gap(t.cz(8.0))
+                    .gap(t.cz(4.0))
+                    .child(attach_button)
+                    .children(permissions_chip)
                     .child(div().flex_1().min_w_0().when_some(self.attach_error.clone(), |slot, error| {
-                        slot.pl(t.cz(8.0))
+                        slot.pl(t.cz(6.0))
                             .truncate()
                             .font_family(UI_FONT_FAMILY)
                             .text_size(t.cz(text_size::SMALL))
@@ -539,14 +589,16 @@ impl ComposerView {
                             .child(error)
                     }))
                     .child(
+                        div().flex().items_center().gap(t.cz(0.0)).children(model_chip).children(traits_chip),
+                    )
+                    .child(
                         div()
+                            .ml(t.cz(4.0))
                             .flex()
                             .items_center()
-                            .gap(t.cz(2.0))
-                            .child(div().flex().items_center().children(model_chip).children(traits_chip))
-                            .children(permissions_chip),
-                    )
-                    .child(div().flex().items_center().gap(t.cz(8.0)).children(self.render_actions(cx))),
+                            .gap(t.cz(8.0))
+                            .children(self.render_actions(cx)),
+                    ),
             )
             .into_any_element()
     }
@@ -780,6 +832,99 @@ impl ComposerView {
                                         .text_color(t.muted)
                                         .truncate()
                                         .child(description),
+                                )
+                            })
+                    }))
+                })
+                .into_any_element(),
+        )
+    }
+
+    // MARK: @ Mention menu
+
+    /// The `@` file-mention menu: floats above the composer; the editor keeps the keyboard and
+    /// forwards ↑/↓, Return, Tab and Escape.
+    pub(crate) fn render_mention_menu(&mut self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let menu = self.mention.clone()?;
+        let t = cx.soprano_theme().clone();
+        let zoom = t.chat_zoom_factor();
+        let matches = self.shown_mentions();
+        let empty = if menu.token.query.is_empty() {
+            "No files found in this folder.".to_owned()
+        } else {
+            format!("No files match “@{}”", menu.token.query)
+        };
+        Some(
+            div()
+                .id("composer-mention-menu")
+                .debug_selector(|| "composer-mention-menu".into())
+                .absolute()
+                .left_0()
+                .right_0()
+                .bottom_full()
+                .mb(t.cz(6.0))
+                .rounded(t.cz(8.0))
+                .border_1()
+                .border_color(t.border)
+                .bg(t.popover)
+                .shadow_lg()
+                .p(t.cz(4.0))
+                .max_h(t.cz(288.0))
+                .overflow_y_scroll()
+                .track_scroll(&self.mention_scroll)
+                .occlude()
+                .map(|list| {
+                    if matches.is_empty() {
+                        return list.child(
+                            div().min_h(t.cz(28.0)).px(t.cz(8.0)).flex().items_center().child(text(
+                                empty,
+                                text_size::ROW,
+                                FontWeight::NORMAL,
+                                t.muted,
+                                &t,
+                            )),
+                        );
+                    }
+                    list.children(matches.into_iter().enumerate().map(|(index, path)| {
+                        let highlighted = menu.highlighted == Some(index);
+                        let (name, parent) = split_mention_path(&path);
+                        let name = name.to_owned();
+                        let parent = parent.map(str::to_owned);
+                        let icon_name = file_type_icon(&name);
+                        let insert = path;
+                        div()
+                            .id(SharedString::from(format!("composer-mention-{index}")))
+                            .min_h(t.cz(28.0))
+                            .px(t.cz(8.0))
+                            .py(t.cz(4.0))
+                            .rounded(t.cz(4.0))
+                            .flex()
+                            .flex_row()
+                            .items_center()
+                            .gap(t.cz(8.0))
+                            .cursor_pointer()
+                            .when(highlighted, |row| row.bg(t.foreground.opacity(0.09)))
+                            .on_hover(cx.listener(move |this, hovered: &bool, _, cx| {
+                                if *hovered {
+                                    this.set_mention_highlight(index, cx);
+                                }
+                            }))
+                            .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                            .on_click(cx.listener(move |this, _, window, cx| {
+                                this.insert_mention(&insert, window, cx);
+                            }))
+                            .child(icon(icon_name).size(13.0 * zoom).color(t.muted))
+                            .child(text(name, text_size::ROW, FontWeight::MEDIUM, t.foreground, &t))
+                            .when_some(parent, |row, parent| {
+                                row.child(
+                                    div()
+                                        .flex_1()
+                                        .min_w_0()
+                                        .truncate()
+                                        .font_family(UI_FONT_FAMILY)
+                                        .text_size(t.cz(text_size::SMALL))
+                                        .text_color(t.muted)
+                                        .child(parent),
                                 )
                             })
                     }))
