@@ -264,6 +264,12 @@ impl ComposerView {
         let t = cx.soprano_theme().clone();
         let checked = draft.checked(&request);
         let total = request.questions.len();
+        let context: Vec<SharedString> = self
+            .question()
+            .as_ref()
+            .and_then(|q| q.context())
+            .map(|context| context.split("\n\n").map(|p| SharedString::from(p.trim().to_owned())).collect())
+            .unwrap_or_default();
         Some(
             div()
                 .pl(t.cz(16.0))
@@ -315,6 +321,22 @@ impl ComposerView {
                                 ),
                         ),
                 )
+                .when(!context.is_empty(), |panel| {
+                    panel.child(
+                        div()
+                            .id("composer-question-context")
+                            .mt(t.cz(8.0))
+                            .max_h(t.cz(140.0))
+                            .overflow_y_scroll()
+                            .flex()
+                            .flex_col()
+                            .gap(t.cz(6.0))
+                            .font_family(UI_FONT_FAMILY)
+                            .text_size(t.cz(text_size::BODY))
+                            .text_color(t.muted)
+                            .children(context.into_iter().map(|paragraph| div().min_w_0().child(paragraph))),
+                    )
+                })
                 .child(
                     div()
                         .mt(t.cz(8.0))

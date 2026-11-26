@@ -470,9 +470,55 @@ fn a_question_form_becomes_fields_in_order_with_their_own_answer_keys() {
     );
     assert_eq!(first.choices[0].detail.as_deref(), Some("Local file"));
     assert_eq!(first.other_key.as_deref(), Some("q0__other"));
-    assert_eq!(first.recommended.as_deref(), Some("SQLite"));
+    assert_eq!(first.preselected, ["SQLite"]);
     assert!(question.fields[1].allows_multiple);
     assert_eq!(question.fields[1].other_key, None);
+}
+
+#[test]
+fn a_form_keeps_its_fields_in_the_order_sent_with_its_text_labels_and_checked_options() {
+    // omp's `ask` form over ACP: named fields, the form's own text as the message, each radio as
+    // `const` (its value) + `title` (its label), the checked one as `default`.
+    let schema: Value = serde_json::from_str(
+        r#"{"type":"object","properties":{
+          "rollout":{"type":"string","title":"1. How far?","oneOf":[{"const":"dev_only","title":"Test on the dev store only"},{"const":"nothing","title":"Nothing yet"}]},
+          "full_match":{"type":"string","title":"2. The rest","oneOf":[{"const":"ask_eric","title":"Keep $159 for now"},{"const":"leave","title":"Leave it"}],"default":"ask_eric"},
+          "targets":{"type":"array","title":"3. Where?","items":{"anyOf":[{"const":"us","title":"US"},{"const":"uk","title":"UK"}]},"default":["uk"]}
+        }}"#,
+    )
+    .expect("schema");
+    let message = "The discount is built.\n\nThe rest needs a decision.";
+    let question = AgentChatQuestion::new(message, &schema).expect("question");
+    assert_eq!(
+        question.fields.iter().map(|f| f.key.as_str()).collect::<Vec<_>>(),
+        vec!["rollout", "full_match", "targets"]
+    );
+    assert_eq!(
+        question.fields[0].choices.iter().map(|c| c.label.as_str()).collect::<Vec<_>>(),
+        vec!["Test on the dev store only", "Nothing yet"]
+    );
+    assert_eq!(question.context(), Some(message));
+    assert_eq!(
+        question.preselected(),
+        BTreeMap::from([
+            ("full_match".to_owned(), vec!["Keep $159 for now".to_owned()]),
+            ("targets".to_owned(), vec!["UK".to_owned()]),
+        ])
+    );
+    // The preselected label goes back as the option's value.
+    assert_eq!(
+        Value::Object(question.content(&question.preselected())),
+        json!({"full_match": "ask_eric", "targets": ["uk"]})
+    );
+}
+
+#[test]
+fn a_message_that_only_repeats_the_question_is_no_context() {
+    let schema = json!({"type": "object", "properties": {
+        "q0": {"type": "string", "title": "Pick one", "oneOf": [{"const": "A", "title": "A"}]},
+    }});
+    assert_eq!(AgentChatQuestion::new("Pick one", &schema).expect("question").context(), None);
+    assert_eq!(AgentChatQuestion::new("", &schema).expect("question").context(), None);
 }
 
 #[test]
@@ -573,7 +619,7 @@ fn titled_enums_and_enum_names_display_human_labels_while_returning_wire_values(
     // Companion `q0_other` is paired with `q0`, not shown as a separate question.
     assert_eq!(question.fields.iter().map(|f| f.key.as_str()).collect::<Vec<_>>(), vec!["q0", "q1", "q2"]);
     assert_eq!(question.fields[0].other_key.as_deref(), Some("q0_other"));
-    assert_eq!(question.fields[0].recommended.as_deref(), Some("(Recommended) Trigger macOS Dictation"));
+    assert_eq!(question.fields[0].preselected, ["(Recommended) Trigger macOS Dictation"]);
 
     // The UI sees human-readable labels, never raw "1"/"2"/"3".
     let request = question.user_input_request("r");

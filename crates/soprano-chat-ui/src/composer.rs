@@ -385,7 +385,7 @@ impl ComposerView {
         }
     }
 
-    fn question(&self) -> Option<AgentChatQuestion> {
+    pub(crate) fn question(&self) -> Option<AgentChatQuestion> {
         match self.session.borrow().interaction() {
             Some(ChatInteraction::Question(question)) => Some(question.clone()),
             _ => None,
@@ -489,7 +489,13 @@ impl ComposerView {
                 self.stashed_text = Some(self.text(cx));
             }
             self.question_request_id = Some(request.id.clone());
-            let draft = self.answers.entry(request.id.clone()).or_default().clone();
+            let selections =
+                self.shown_question.as_ref().map(AgentChatQuestion::preselected).unwrap_or_default();
+            let draft = self
+                .answers
+                .entry(request.id.clone())
+                .or_insert_with(|| AnswerDraft { selections, ..AnswerDraft::default() })
+                .clone();
             let custom = draft
                 .current_question(&request)
                 .and_then(|q| draft.custom.get(&q.id).cloned())

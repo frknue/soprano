@@ -164,7 +164,9 @@ pub struct QuestionField {
     pub allows_multiple: bool,
     /// The key a typed answer goes under, when the field takes one.
     pub other_key: Option<String>,
-    pub recommended: Option<String>,
+    /// The labels chosen before the person picks: the schema's `default` (a form's checked
+    /// options, or the option an agent recommends).
+    pub preselected: Vec<String>,
 }
 
 /// Questions the agent asks, as an ACP form elicitation: one or more fields, each a choice
@@ -186,7 +188,14 @@ impl AgentChatQuestion {
                 .is_some_and(|base| properties.contains_key(base))
         };
         let mut keys: Vec<&String> = properties.keys().filter(|k| !is_companion_other(k.as_str())).collect();
-        keys.sort_by(|a, b| numeric_order(a, b));
+        // A form keeps the order its fields were sent in. Only an indexed series (`q0`, `q1`, …)
+        // is put in numeric order: an agent whose JSON encoder sorts keys sends `q10` before `q2`.
+        let indexes: Option<Vec<(&str, u64)>> = keys.iter().map(|k| series_index(k)).collect();
+        if let Some(indexes) = indexes
+            && indexes.iter().all(|(prefix, _)| *prefix == indexes[0].0)
+        {
+            keys.sort_by_key(|k| series_index(k).map(|(_, index)| index));
+        }
         let mut fields = Vec::new();
         for key in keys {
             let property = &properties[key.as_str()];
@@ -202,12 +211,18 @@ impl AgentChatQuestion {
                 continue;
             }
             let other_key = other_key.or_else(|| choices.is_empty().then(|| key.clone()));
-            let recommended = property.get("default").and_then(Value::as_str).map(|raw| {
-                choices
-                    .iter()
-                    .find(|c| c.value == raw || c.label == raw)
-                    .map_or_else(|| raw.to_owned(), |c| c.label.clone())
-            });
+            // A schema `default` names options by their wire value, never by their label: one
+            // option's label may be another's value.
+            let defaults: Vec<&str> = match property.get("default") {
+                Some(Value::String(raw)) => vec![raw.as_str()],
+                Some(Value::Array(values)) => values.iter().filter_map(Value::as_str).collect(),
+                _ => Vec::new(),
+            };
+            let preselected = choices
+                .iter()
+                .filter(|c| defaults.contains(&c.value.as_str()))
+                .map(|c| c.label.clone())
+                .collect();
             fields.push(QuestionField {
                 key: key.clone(),
                 title: property.get("title").and_then(Value::non_empty_string).unwrap_or(message).to_owned(),
@@ -215,13 +230,29 @@ impl AgentChatQuestion {
                 choices,
                 allows_multiple: is_array,
                 other_key,
-                recommended,
+                preselected,
             });
         }
         if fields.is_empty() {
             return None;
         }
         Some(Self { message: message.to_owned(), fields })
+    }
+
+    /// What the agent says about the form besides its questions (a form's own text); `None`
+    /// when the message is empty or only repeats a question.
+    pub fn context(&self) -> Option<&str> {
+        let message = self.message.trim();
+        (!message.is_empty() && self.fields.iter().all(|f| f.title != message)).then_some(message)
+    }
+
+    /// The answers a new draft starts with, by question id: each field's preselected labels.
+    pub fn preselected(&self) -> BTreeMap<String, Vec<String>> {
+        self.fields
+            .iter()
+            .filter(|f| !f.preselected.is_empty())
+            .map(|f| (f.key.clone(), f.preselected.clone()))
+            .collect()
     }
 
     /// The questions as the composer asks them: the field's description as the header chip,
@@ -373,42 +404,11 @@ fn scalar_string(value: &Value) -> Option<String> {
     }
 }
 
-/// `q0`, `q1`, …, `q10` in numeric order rather than by string (Foundation's `.numeric`).
-fn numeric_order(a: &str, b: &str) -> std::cmp::Ordering {
-    let mut a = a.chars().peekable();
-    let mut b = b.chars().peekable();
-    loop {
-        match (a.peek().copied(), b.peek().copied()) {
-            (None, None) => return std::cmp::Ordering::Equal,
-            (None, Some(_)) => return std::cmp::Ordering::Less,
-            (Some(_), None) => return std::cmp::Ordering::Greater,
-            (Some(x), Some(y)) if x.is_ascii_digit() && y.is_ascii_digit() => {
-                let mut left = String::new();
-                while let Some(c) = a.peek().copied().filter(char::is_ascii_digit) {
-                    left.push(c);
-                    a.next();
-                }
-                let mut right = String::new();
-                while let Some(c) = b.peek().copied().filter(char::is_ascii_digit) {
-                    right.push(c);
-                    b.next();
-                }
-                let left = left.trim_start_matches('0');
-                let right = right.trim_start_matches('0');
-                let order = left.len().cmp(&right.len()).then_with(|| left.cmp(right));
-                if order != std::cmp::Ordering::Equal {
-                    return order;
-                }
-            }
-            (Some(x), Some(y)) => {
-                if x != y {
-                    return x.cmp(&y);
-                }
-                a.next();
-                b.next();
-            }
-        }
-    }
+/// A key of an indexed series split into its prefix and number (`q10` → `("q", 10)`); `None`
+/// for a key that does not end in digits.
+fn series_index(key: &str) -> Option<(&str, u64)> {
+    let prefix = key.trim_end_matches(|c: char| c.is_ascii_digit());
+    Some((prefix, key[prefix.len()..].parse().ok()?))
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

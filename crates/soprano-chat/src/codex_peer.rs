@@ -956,7 +956,7 @@ fn handle_codex_request(
                 method: "elicitation/create".into(),
                 params: json!({
                     "mode": "form",
-                    "message": "Input requested",
+                    "message": "",
                     "requestedSchema": {
                         "type": "object",
                         "properties": Value::Object(properties),

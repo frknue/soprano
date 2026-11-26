@@ -1015,7 +1015,7 @@ fn claude_ask_user_question_to_elicitation(input: &Value) -> Option<(Value, Vec<
     }
     let params = json!({
         "mode": "form",
-        "message": "Input requested",
+        "message": "",
         "requestedSchema": {
             "type": "object",
             "properties": Value::Object(properties),

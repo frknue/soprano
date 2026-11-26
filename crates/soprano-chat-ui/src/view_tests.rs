@@ -430,6 +430,61 @@ fn a_question_takes_its_options_by_digit_and_submits_the_answer(cx: &mut TestApp
 }
 
 #[gpui::test]
+fn a_question_starts_on_its_default_option_and_return_submits_it(cx: &mut TestAppContext) {
+    let (chat, cx) = open_chat(cx);
+    chat.start(cx);
+    chat.type_text("Pick a fix", cx);
+    cx.simulate_keystrokes("enter");
+    settle(cx);
+    let id = chat.agent.ask(
+        "elicitation/create",
+        json!({
+            "sessionId": "new-session",
+            "message": "The patch is smaller.",
+            "mode": "form",
+            "requestedSchema": {"type": "object", "properties": {
+                "approach": {"type": "string", "title": "Which approach?", "default": "rewrite",
+                             "oneOf": [{"const": "patch", "title": "Patch"}, {"const": "rewrite", "title": "Rewrite"}]},
+            }},
+        }),
+    );
+    settle(cx);
+    chat.focus_composer(cx);
+    cx.simulate_keystrokes("enter");
+    settle(cx);
+    assert_eq!(
+        chat.agent.answer(&id),
+        Some(Ok(json!({"action": "accept", "content": {"approach": "rewrite"}})))
+    );
+}
+
+#[gpui::test]
+fn a_default_names_an_option_by_its_value_even_when_another_option_has_that_label(cx: &mut TestAppContext) {
+    let (chat, cx) = open_chat(cx);
+    chat.start(cx);
+    chat.type_text("Pick one", cx);
+    cx.simulate_keystrokes("enter");
+    settle(cx);
+    let id = chat.agent.ask(
+        "elicitation/create",
+        json!({
+            "sessionId": "new-session",
+            "message": "",
+            "mode": "form",
+            "requestedSchema": {"type": "object", "properties": {
+                "pick": {"type": "string", "title": "Which?", "default": "b",
+                         "oneOf": [{"const": "a", "title": "b"}, {"const": "b", "title": "Second"}]},
+            }},
+        }),
+    );
+    settle(cx);
+    chat.focus_composer(cx);
+    cx.simulate_keystrokes("enter");
+    settle(cx);
+    assert_eq!(chat.agent.answer(&id), Some(Ok(json!({"action": "accept", "content": {"pick": "b"}}))));
+}
+
+#[gpui::test]
 fn slash_lists_the_agents_commands_and_tab_inserts_the_highlighted_one(cx: &mut TestAppContext) {
     let (chat, cx) = open_chat(cx);
     chat.start(cx);

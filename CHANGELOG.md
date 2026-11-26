@@ -343,6 +343,10 @@ the single source of truth for the version shown in **Settings ▸ About**.
   actions. Workspaces saved with depth layers reopen with each layer as its own tab.
 
 ### Fixed
+- **Agent forms in Chat UI** (omp's `ask` and other form questions): the questions come in
+  the order the agent wrote them instead of sorted by field name, the form's own text shows
+  above the question, and an option the form marks as default is selected from the start,
+  so `Return` accepts it.
 - **Interactive question choices in Chat UI across all agents**: questions from Antigravity
   (`agy acp`), Claude Code (`AskUserQuestion`), Codex, OpenCode, and omp now show each
   choice's human-readable `title` / `enumNames` label (wrapping long text cleanly) while
