@@ -5,15 +5,18 @@
 use std::f32::consts::PI;
 
 use gpui::{
-    AnyElement, Context, FontWeight, Hsla, IntoElement, ParentElement, PathBuilder, SharedString, Styled,
-    Window, canvas, div, point, prelude::*, px,
+    AnyElement, Context, FontWeight, Hsla, IntoElement, ObjectFit, ParentElement, PathBuilder, SharedString,
+    Styled, Window, canvas, div, img, point, prelude::*, px,
 };
 use soprano_agents::ApprovalOptions;
 use soprano_chat::{AgentChatPlanEntry, ChatInteraction, ChatPhase, PlanEntryStatus};
 use soprano_ui::button::{ButtonSize, IconButtonSize};
 use soprano_ui::fonts::{MONO_FONT_FAMILY, UI_FONT_FAMILY};
-use soprano_ui::{ActiveSopranoTheme, Button, IconButton, IconName, Keycaps, SopranoTheme, icon};
+use soprano_ui::{
+    ActiveSopranoTheme, Button, IconButton, IconName, Keycaps, SopranoTheme, file_type_icon, icon,
+};
 
+use crate::attachments::Attachment;
 use crate::composer::ComposerView;
 use crate::composer_logic::{
     ComposerPrimaryAction, ContextLevel, MODE_CATEGORY, MODEL_CATEGORY, THINKING_CATEGORY,
@@ -22,6 +25,30 @@ use crate::composer_logic::{
 use crate::popovers::PopoverKind;
 use crate::widgets::text_size;
 use crate::work_log::timeline_icon;
+
+/// The ✕ on an attachment: a small disc that stays readable over a thumbnail.
+fn remove_attachment_button(
+    index: usize,
+    attachment: &Attachment,
+    t: &SopranoTheme,
+    cx: &mut Context<ComposerView>,
+) -> impl IntoElement + use<> {
+    let (rest, hover) = (t.background.opacity(0.8), t.background);
+    div()
+        .id(("chat-composer-attachment-remove", index))
+        .flex()
+        .flex_none()
+        .items_center()
+        .justify_center()
+        .size(t.cz(18.0))
+        .rounded(t.cz(9.0))
+        .bg(rest)
+        .cursor_pointer()
+        .hover(move |button| button.bg(hover))
+        .tooltip(soprano_ui::tooltip(format!("Remove {}", attachment.name())))
+        .on_click(cx.listener(move |this, _, _, cx| this.remove_attachment(index, cx)))
+        .child(icon(IconName::X).size(10.0 * t.chat_zoom_factor()).color(t.foreground))
+}
 
 /// The agent's mark in the model chip and picker: omp (oh-my-pi) has no vector mark, so a heavy
 /// "π" in the UI font.
@@ -358,6 +385,66 @@ impl ComposerView {
         )
     }
 
+    // MARK: Attachments
+
+    /// What the message brings along, over the editor: images as thumbnails, other files by
+    /// name, each with a ✕ that takes it out again.
+    pub(crate) fn render_attachments(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        if self.question_request_id.is_some() || self.attachments.is_empty() {
+            return None;
+        }
+        let t = cx.soprano_theme().clone();
+        let zoom = t.chat_zoom_factor();
+        let items = self.attachments.iter().enumerate().map(|(index, attachment)| {
+            let remove = remove_attachment_button(index, attachment, &t, cx);
+            let item = div()
+                .id(("chat-composer-attachment", index))
+                .relative()
+                .flex_none()
+                .rounded(t.cz(8.0))
+                .overflow_hidden()
+                .tooltip(soprano_ui::tooltip(attachment.name()));
+            if attachment.is_image() {
+                item.size(t.cz(56.0))
+                    .border_1()
+                    .border_color(t.border)
+                    .child(img(attachment.path.clone()).size_full().object_fit(ObjectFit::Cover))
+                    .child(div().absolute().top(t.cz(3.0)).right(t.cz(3.0)).child(remove))
+            } else {
+                let name = attachment.name();
+                item.flex()
+                    .flex_row()
+                    .items_center()
+                    .gap(t.cz(6.0))
+                    .h(t.cz(28.0))
+                    .max_w(t.cz(240.0))
+                    .pl(t.cz(8.0))
+                    .pr(t.cz(5.0))
+                    .bg(t.hover)
+                    .font_family(UI_FONT_FAMILY)
+                    .text_size(t.cz(text_size::SMALL))
+                    .text_color(t.foreground)
+                    .child(icon(file_type_icon(&name)).size(14.0 * zoom).color(t.muted))
+                    .child(div().min_w_0().truncate().child(name))
+                    .child(remove)
+            }
+        });
+        Some(
+            div()
+                .id("chat-composer-attachments")
+                .debug_selector(|| "chat-composer-attachments".into())
+                .flex()
+                .flex_row()
+                .flex_wrap()
+                .items_center()
+                .gap(t.cz(8.0))
+                .px(t.cz(16.0))
+                .pt(t.cz(14.0))
+                .children(items)
+                .into_any_element(),
+        )
+    }
+
     // MARK: Footer
 
     pub(crate) fn render_footer(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
@@ -443,7 +530,14 @@ impl ComposerView {
                     .flex()
                     .items_center()
                     .gap(t.cz(8.0))
-                    .child(div().flex_1())
+                    .child(div().flex_1().min_w_0().when_some(self.attach_error.clone(), |slot, error| {
+                        slot.pl(t.cz(8.0))
+                            .truncate()
+                            .font_family(UI_FONT_FAMILY)
+                            .text_size(t.cz(text_size::SMALL))
+                            .text_color(t.failed)
+                            .child(error)
+                    }))
                     .child(
                         div()
                             .flex()

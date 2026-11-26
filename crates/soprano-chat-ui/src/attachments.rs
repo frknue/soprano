@@ -1,4 +1,4 @@
-//! What the composer's message brings along, without GPUI: files and pasted images. Every
+//! What a composer's message brings along, without GPUI: files and pasted images. Every
 //! agent takes them the same way, as paths at the end of the message, which works for a
 //! prompt on a command line, text typed into a terminal and a chat session alike. A pasted
 //! image has no file yet, so the composer writes one.

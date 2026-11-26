@@ -6,13 +6,13 @@
 //! composer. A new thread is drafted in the same place, for a project and an agent. It reads
 //! the workspace entity and never mutates it: actions go out as [`DashboardEvent`]s.
 
-pub mod attachments;
 pub mod keys;
 pub mod state;
 mod view;
 
-pub use attachments::Attachment;
 pub use keys::{KeyAction, KeyFocus, ScrollAmount};
+pub use soprano_chat_ui::Attachment;
+pub use soprano_chat_ui::attachments;
 pub use state::{AgentChoice, AgentList, DashboardEntry, ListRow, ProjectChoice, ThreadOption};
 pub use view::{
     AgentDashboard, BranchProvider, DashboardEvent, DashboardHost, DraftOptionsProvider, ProjectsProvider,

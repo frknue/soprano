@@ -13,15 +13,16 @@
 //! ```
 
 use std::cell::{Cell, RefCell};
+use std::path::PathBuf;
 use std::rc::Rc;
 use std::time::Duration;
 
 use futures::StreamExt;
 use futures::channel::mpsc;
 use gpui::{
-    App, Bounds, ClickEvent, Context, Entity, EventEmitter, FocusHandle, Focusable, IntoElement,
-    KeyDownEvent, MouseButton, ParentElement, Pixels, Render, Styled, Subscription, Task, Window, canvas,
-    div, prelude::*,
+    App, Bounds, ClickEvent, Context, Entity, EventEmitter, ExternalPaths, FocusHandle, Focusable,
+    IntoElement, KeyDownEvent, MouseButton, ParentElement, Pixels, Render, Styled, Subscription, Task,
+    Window, canvas, div, prelude::*,
 };
 use gpui_component::input::{self as component_input, Input, InputEvent, InputState};
 use soprano_chat::{AgentChatEvent, AgentChatSession, ChatPhase};
@@ -250,6 +251,27 @@ impl ChatView {
         editor.update(cx, |editor, cx| editor.focus(window, cx));
     }
 
+    /// Where images pasted into the composer are kept as files for the agent to read.
+    pub fn set_attachments_dir(&self, folder: impl Into<PathBuf>, cx: &mut App) {
+        let folder = folder.into();
+        self.composer.update(cx, |composer, _| composer.set_attachments_dir(folder));
+    }
+
+    /// Attaches files to the composer (a drop onto the chat or from the file explorer) and
+    /// focuses its editor.
+    pub fn attach_files(
+        &mut self,
+        paths: impl IntoIterator<Item = PathBuf>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.composer.update(cx, |composer, cx| {
+            composer.attach_files(paths, cx);
+            composer.focus_editor(window, cx);
+        });
+        cx.emit(ChatViewEvent::FocusRequested);
+    }
+
     /// Opens the Find-in-Chat bar and focuses its search input.
     pub fn open_find(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.find_open = true;
@@ -469,6 +491,9 @@ impl Render for ChatView {
                 MouseButton::Left,
                 cx.listener(|_, _, _, cx| cx.emit(ChatViewEvent::FocusRequested)),
             )
+            .on_drop(cx.listener(|this, dropped: &ExternalPaths, window, cx| {
+                this.attach_files(dropped.paths().iter().cloned(), window, cx);
+            }))
             .relative()
             .size_full()
             .overflow_hidden()

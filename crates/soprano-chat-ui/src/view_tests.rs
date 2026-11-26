@@ -866,3 +866,135 @@ fn chat_zoom_scales_both_composer_text_and_timeline_messages(cx: &mut TestAppCon
     let a2 = row1_2.unwrap().size.height;
     assert!(a2 > a1 * 1.5, "assistant message row height did not scale: {a1:?} -> {a2:?}");
 }
+
+fn paste_clipboard(cx: &mut VisualTestContext, clipboard: gpui::ClipboardItem) {
+    cx.write_to_clipboard(clipboard);
+    cx.simulate_keystrokes(if cfg!(target_os = "macos") { "cmd-v" } else { "ctrl-v" });
+    cx.run_until_parked();
+}
+
+#[gpui::test]
+fn files_dropped_onto_the_chat_composer_or_timeline_are_attached_and_sent(cx: &mut TestAppContext) {
+    use gpui::{ExternalPaths, FileDropEvent, Focusable as _};
+    use soprano_platform::shell::path_word;
+
+    use crate::attachments::Attachment;
+
+    let (chat, cx) = open_chat(cx);
+    chat.start(cx);
+    cx.simulate_resize(gpui::size(px(1000.), px(700.)));
+    settle(cx);
+    // Focus outside the composer first.
+    cx.simulate_click(point(px(500.), px(200.)), Modifiers::none());
+    cx.run_until_parked();
+    chat.events.borrow_mut().clear();
+
+    // Drop a screenshot onto the composer card.
+    let composer_pos = cx.debug_bounds("chat-composer-card").expect("composer card bounds").center();
+    let shot = PathBuf::from("/tmp/shots/Screen Shot 1.png");
+    cx.simulate_event(FileDropEvent::Entered {
+        position: composer_pos,
+        paths: ExternalPaths(vec![shot.clone()].into()),
+    });
+    cx.simulate_event(FileDropEvent::Submit { position: composer_pos });
+    cx.run_until_parked();
+
+    let attached = cx.update(|_, cx| chat.view.read(cx).composer().read(cx).attachments().to_vec());
+    assert_eq!(attached, [Attachment::file(&shot)]);
+    assert!(cx.debug_bounds("chat-composer-attachments").is_some());
+    let focused = cx.update(|window, cx| {
+        let editor = chat.view.read(cx).composer().read(cx).editor.clone();
+        editor.focus_handle(cx).contains_focused(window, cx)
+    });
+    assert!(focused);
+    assert!(chat.events.borrow().contains(&ChatViewEvent::FocusRequested));
+
+    // Dropping another file on the timeline above the composer also attaches it (deduplicating
+    // duplicates).
+    let timeline_pos = point(px(500.), px(120.));
+    let notes = PathBuf::from("/tmp/shots/notes.md");
+    cx.simulate_event(FileDropEvent::Entered {
+        position: timeline_pos,
+        paths: ExternalPaths(vec![shot.clone(), notes.clone()].into()),
+    });
+    cx.simulate_event(FileDropEvent::Submit { position: timeline_pos });
+    cx.run_until_parked();
+
+    let attached = cx.update(|_, cx| chat.view.read(cx).composer().read(cx).attachments().to_vec());
+    assert_eq!(attached, [Attachment::file(&shot), Attachment::file(&notes)]);
+
+    // Pressing Return with only attachments (no text) sends their paths and clears the shelf.
+    cx.simulate_keystrokes("enter");
+    settle(cx);
+    assert_eq!(
+        chat.agent.sent_prompts(),
+        [format!("session/prompt: {} {}", path_word(&shot), path_word(&notes))]
+    );
+    let attached = cx.update(|_, cx| chat.view.read(cx).composer().read(cx).attachments().to_vec());
+    assert!(attached.is_empty());
+}
+
+#[gpui::test]
+fn pasted_images_and_files_in_the_chat_composer_become_attachments(cx: &mut TestAppContext) {
+    use gpui::{ClipboardEntry, ClipboardItem, ExternalPaths, Image, ImageFormat};
+    use soprano_platform::shell::path_word;
+
+    let (chat, cx) = open_chat(cx);
+    let folder = tempfile::tempdir().expect("attachments folder");
+    cx.update(|_, cx| chat.view.update(cx, |view, cx| view.set_attachments_dir(folder.path(), cx)));
+    chat.start(cx);
+    cx.simulate_resize(gpui::size(px(1000.), px(700.)));
+    settle(cx);
+    cx.update(|window, cx| chat.view.update(cx, |view, cx| view.focus_composer(window, cx)));
+    cx.run_until_parked();
+
+    // Paste two screenshots: both are stored as files under the attachments folder.
+    let shot = ClipboardItem::new_image(&Image::from_bytes(ImageFormat::Png, b"a screenshot".to_vec()));
+    paste_clipboard(cx, shot.clone());
+    paste_clipboard(cx, shot);
+    let pasted = cx.update(|_, cx| chat.view.read(cx).composer().read(cx).attachments().to_vec());
+    assert_eq!(pasted.len(), 2);
+    assert!(pasted.iter().all(|a| a.pasted && a.path.starts_with(folder.path())));
+    assert_eq!(std::fs::read(&pasted[1].path).expect("pasted image"), b"a screenshot");
+
+    // Removing the first deletes its temporary file; the second remains.
+    cx.update(|_, cx| {
+        let composer = chat.view.read(cx).composer().clone();
+        composer.update(cx, |composer, cx| composer.remove_attachment(0, cx));
+    });
+    assert!(!pasted[0].path.exists());
+    assert!(pasted[1].path.exists());
+
+    // Copied files paste as attachments too; plain text still pastes into the editor.
+    let copied_file = folder.path().join("report.txt");
+    paste_clipboard(
+        cx,
+        ClipboardItem {
+            entries: vec![ClipboardEntry::ExternalPaths(ExternalPaths(vec![copied_file.clone()].into()))],
+        },
+    );
+    paste_clipboard(cx, ClipboardItem::new_string("Please check this".into()));
+    assert_eq!(chat.composer_text(cx), "Please check this");
+
+    cx.simulate_keystrokes("enter");
+    settle(cx);
+    assert_eq!(
+        chat.agent.sent_prompts(),
+        [format!(
+            "session/prompt: Please check this\n{} {}",
+            path_word(&pasted[1].path),
+            path_word(&copied_file)
+        )]
+    );
+    // Sent pasted image stays on disk for the agent to read.
+    assert!(pasted[1].path.exists());
+
+    // Unsent pasted image is cleaned up when the chat closes.
+    let unsent_shot = ClipboardItem::new_image(&Image::from_bytes(ImageFormat::Png, b"unsent".to_vec()));
+    paste_clipboard(cx, unsent_shot);
+    let unsent = cx.update(|_, cx| chat.view.read(cx).composer().read(cx).attachments().to_vec());
+    assert_eq!(unsent.len(), 1);
+    assert!(unsent[0].path.exists());
+    cx.update(|_, cx| chat.view.update(cx, |view, cx| view.close(cx)));
+    assert!(!unsent[0].path.exists());
+}

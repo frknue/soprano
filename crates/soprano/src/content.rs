@@ -845,7 +845,10 @@ impl ContentHost {
         let chat_launch = self.chat_launch(&profile, cwd.as_deref())?;
         let session = soprano_chat::session::AgentChatSession::new(chat_launch);
         let agent_name = profile.name.clone();
+        let attachments = soprano_platform::paths::data_dir(&soprano_platform::AppIdentity::current())
+            .join(crate::agents_window::ATTACHMENTS_FOLDER);
         let view = cx.new(|cx| ChatView::new(session, agent_name.clone(), window, cx));
+        view.update(cx, |view, cx| view.set_attachments_dir(attachments, cx));
         let target_for_events = target.clone();
         let subscription = cx.subscribe(&view, move |host, _, event: &ChatViewEvent, cx| {
             host.handle_chat_event(&target_for_events, &agent_name, event, cx);
@@ -1305,7 +1308,8 @@ impl ContentHost {
         true
     }
 
-    /// Drops `paths` onto the terminal of `target` as shell-escaped words.
+    /// Drops `paths` onto the terminal (as shell-escaped words) or chat composer (as
+    /// attachments) of `target`.
     pub fn drop_paths(
         &mut self,
         target: &TerminalTarget,
@@ -1313,9 +1317,15 @@ impl ContentHost {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if let Some(PaneContent::Terminal(view)) = self.contents.get(target).cloned() {
-            let payload = soprano_term::drop_content::DropPayload::files(paths);
-            view.update(cx, |view, cx| view.drop_payload(&payload, window, cx));
+        match self.contents.get(target).cloned() {
+            Some(PaneContent::Terminal(view)) => {
+                let payload = soprano_term::drop_content::DropPayload::files(paths);
+                view.update(cx, |view, cx| view.drop_payload(&payload, window, cx));
+            }
+            Some(PaneContent::Chat(view)) => {
+                view.update(cx, |view, cx| view.attach_files(paths, window, cx));
+            }
+            _ => {}
         }
     }
 }

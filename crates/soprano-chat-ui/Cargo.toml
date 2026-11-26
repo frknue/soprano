@@ -12,6 +12,7 @@ soprano-chat = { path = "../soprano-chat" }
 soprano-editor = { path = "../soprano-editor" }
 soprano-git = { path = "../soprano-git" }
 soprano-keys = { path = "../soprano-keys" }
+soprano-platform = { path = "../soprano-platform" }
 soprano-text = { path = "../soprano-text" }
 soprano-types = { path = "../soprano-types" }
 soprano-ui = { path = "../soprano-ui" }
@@ -21,10 +22,13 @@ serde_json.workspace = true
 chrono = { version = "0.4.42", default-features = false, features = ["std", "clock"] }
 futures = "0.3"
 fancy-regex = "0.14"
+# Pasted TIFF and BMP images are kept as PNG.
+image = { version = "0.25", default-features = false, features = ["png", "tiff", "bmp"] }
 
 [dev-dependencies]
 gpui = { workspace = true, features = ["test-support"] }
 gpui_platform.workspace = true
+tempfile = "3"
 
 [[example]]
 name = "chat_demo"

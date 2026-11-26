@@ -10,6 +10,7 @@
 //! `soprano_ui::init`.
 
 pub mod activity;
+pub mod attachments;
 pub mod changed_file_tree;
 pub mod chat_view;
 pub mod composer;
@@ -28,6 +29,7 @@ pub mod widgets;
 pub mod work_log;
 
 pub use activity::{ActivityLine, activity_parts};
+pub use attachments::Attachment;
 pub use chat_view::{ChatView, ChatViewEvent};
 pub use composer::{ComposerEvent, ComposerView};
 pub use popovers::PopoverKind;

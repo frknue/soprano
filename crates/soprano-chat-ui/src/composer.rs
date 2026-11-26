@@ -15,13 +15,14 @@
 
 use std::cell::Cell;
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::rc::Rc;
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
 use gpui::{
-    App, Bounds, Context, Entity, EventEmitter, FocusHandle, Focusable, IntoElement, KeyDownEvent,
-    ModifiersChangedEvent, ParentElement, Pixels, Render, Styled, Subscription, Task, Window, canvas, div,
-    prelude::*,
+    App, Bounds, ClipboardEntry, ClipboardItem, Context, Entity, EventEmitter, ExternalPaths, FocusHandle,
+    Focusable, IntoElement, KeyDownEvent, ModifiersChangedEvent, ParentElement, Pixels, Render, Styled,
+    Subscription, Task, Window, canvas, div, prelude::*,
 };
 use gpui_component::input::{
     Enter, Escape, IndentInline, InputEvent, MoveDown, MoveUp, Textarea, TextareaState,
@@ -30,6 +31,8 @@ use soprano_agents::{ApprovalOptions, UserInputRequest};
 use soprano_chat::{AgentChatPermission, AgentChatQuestion, ChatInteraction, ChatPhase};
 use soprano_ui::ActiveSopranoTheme;
 use soprano_ui::fonts::UI_FONT_FAMILY;
+
+use crate::attachments::{self, Attachment};
 
 use crate::composer_logic::{
     AnswerDraft, ComposerHistory, ComposerPrimaryAction, ContextMeterReading, MODE_CATEGORY, MODEL_CATEGORY,
@@ -74,7 +77,7 @@ pub struct ComposerView {
     /// Answers drafted per question set.
     answers: HashMap<String, AnswerDraft>,
     /// The question set the editor is answering, if any.
-    question_request_id: Option<String>,
+    pub(crate) question_request_id: Option<String>,
     /// The composer's own text while the editor answers a question.
     stashed_text: Option<String>,
     /// Each question set gets its own draft id, so a new one starts over.
@@ -95,8 +98,20 @@ pub struct ComposerView {
     setting_text: bool,
     /// Where the chips and the meter sit, for the popovers they open.
     pub(crate) anchors: Rc<Anchors>,
+    /// Where a pasted image is kept as a file for the agent to read.
+    attachments_dir: PathBuf,
+    /// The files and pasted images the composer's message brings along.
+    pub(crate) attachments: Vec<Attachment>,
+    /// Why the last pasted image is not among them.
+    pub(crate) attach_error: Option<String>,
     width: f32,
     _subscriptions: Vec<Subscription>,
+}
+
+impl Drop for ComposerView {
+    fn drop(&mut self) {
+        self.attachments.drain(..).for_each(Attachment::discard);
+    }
 }
 
 /// Bounds of the footer controls in the last frame.
@@ -159,6 +174,9 @@ impl ComposerView {
             slash_dismissed: false,
             setting_text: false,
             anchors: Rc::new(Anchors::default()),
+            attachments_dir: std::env::temp_dir().join("soprano-attachments"),
+            attachments: Vec::new(),
+            attach_error: None,
             width: CHAT_MAX_WIDTH,
             _subscriptions: vec![subscription],
         };
@@ -171,7 +189,94 @@ impl ComposerView {
         self.popover = None;
         self.slash = None;
         self.auto_advance = None;
+        self.attachments.drain(..).for_each(Attachment::discard);
+        self.attach_error = None;
         cx.notify();
+    }
+
+    /// Where images pasted into the composer are kept as files for the agent to read.
+    pub fn set_attachments_dir(&mut self, folder: impl Into<PathBuf>) {
+        self.attachments_dir = folder.into();
+    }
+
+    /// The files and pasted images the composer's message brings along.
+    pub fn attachments(&self) -> &[Attachment] {
+        &self.attachments
+    }
+
+    fn can_attach(&self) -> bool {
+        !self.is_stopped() && self.question_request_id.is_none()
+    }
+
+    /// Adds files to the message, each once (a drop onto the chat or composer, copied files
+    /// pasted into it).
+    pub fn attach_files(&mut self, paths: impl IntoIterator<Item = PathBuf>, cx: &mut Context<Self>) {
+        if !self.can_attach() {
+            return;
+        }
+        for path in paths {
+            if !self.attachments.iter().any(|attachment| attachment.path == path) {
+                self.attachments.push(Attachment::file(path));
+            }
+        }
+        self.attach_error = None;
+        cx.notify();
+    }
+
+    /// Adds a pasted image (`bytes` in the format `extension` names) to the message, kept as
+    /// a file in the attachments folder.
+    pub fn attach_image(&mut self, extension: &str, bytes: &[u8], cx: &mut Context<Self>) {
+        if !self.can_attach() {
+            return;
+        }
+        let stored =
+            attachments::store_pasted_image(&self.attachments_dir, extension, bytes, SystemTime::now());
+        self.attach_error = match stored {
+            Ok(attachment) => {
+                self.attachments.push(attachment);
+                None
+            }
+            Err(error) => Some(format!("Could not keep the pasted image: {error}")),
+        };
+        cx.notify();
+    }
+
+    /// Takes one attachment out of the message again (its ✕).
+    pub fn remove_attachment(&mut self, index: usize, cx: &mut Context<Self>) {
+        if index < self.attachments.len() {
+            self.attachments.remove(index).discard();
+            self.attach_error = None;
+            cx.notify();
+        }
+    }
+
+    /// A paste into the composer: copied files, or a copied image, become attachments. False
+    /// leaves the paste to the editor, which inserts the clipboard's text.
+    pub(crate) fn paste(&mut self, clipboard: &ClipboardItem, cx: &mut Context<Self>) -> bool {
+        if !self.can_attach() {
+            return false;
+        }
+        let entries = clipboard.entries();
+        let files = entries.iter().find_map(|entry| match entry {
+            ClipboardEntry::ExternalPaths(paths) if !paths.paths().is_empty() => Some(paths.paths()),
+            _ => None,
+        });
+        if let Some(files) = files {
+            self.attach_files(files.iter().cloned(), cx);
+            return true;
+        }
+        let image = entries.iter().find_map(|entry| match entry {
+            ClipboardEntry::Image(image) => Some(image),
+            _ => None,
+        });
+        match image {
+            // An image copied along with text (a table cell, a web selection) pastes as text.
+            Some(image) if clipboard.text().is_none() => {
+                self.attach_image(image.format.extension(), &image.bytes, cx);
+                true
+            }
+            _ => false,
+        }
     }
 
     pub fn focus_editor(&self, window: &mut Window, cx: &mut App) {
@@ -226,7 +331,11 @@ impl ComposerView {
     }
 
     fn has_content(&self, cx: &App) -> bool {
-        !self.text(cx).trim().is_empty()
+        if self.question_request_id.is_some() {
+            !self.text(cx).trim().is_empty()
+        } else {
+            attachments::message_text(&self.text(cx), &self.attachments).is_some()
+        }
     }
 
     fn is_stopped(&self) -> bool {
@@ -459,10 +568,9 @@ impl ComposerView {
             self.advance_question(window, cx);
             return;
         }
-        let text = self.text(cx).trim().to_owned();
-        if text.is_empty() {
+        let Some(text) = attachments::message_text(&self.text(cx), &self.attachments) else {
             return;
-        }
+        };
         let sent = {
             let permission = self.permission();
             let mut session = self.session.borrow_mut();
@@ -479,6 +587,9 @@ impl ComposerView {
         if !sent {
             return;
         }
+        // Sent: the files stay for the agent to read.
+        self.attachments.clear();
+        self.attach_error = None;
         self.set_text("", window, cx);
         self.history.reset();
         cx.emit(ComposerEvent::Submitted);
@@ -745,14 +856,21 @@ impl Render for ComposerView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.sync_slash_menu(window, cx);
         let t = cx.soprano_theme().clone();
-        let has_panel = self.permission().is_some() || self.question_request_id.is_some();
+        let can_attach = self.can_attach();
+        let has_attachments = self.question_request_id.is_none() && !self.attachments.is_empty();
+        let has_panel = self.permission().is_some() || self.question_request_id.is_some() || has_attachments;
         let anchors = self.anchors.clone();
+        let composer = cx.entity().downgrade();
+        let accent = t.accent;
         let editor = Textarea::new(&self.editor)
             .appearance(false)
             .bordered(false)
             .font_family(UI_FONT_FAMILY)
             .text_size(t.cz(text_size::BODY))
-            .line_height(t.cz(EDITOR_LINE_HEIGHT));
+            .line_height(t.cz(EDITOR_LINE_HEIGHT))
+            .on_paste(move |clipboard, _, cx| {
+                composer.update(cx, |this, cx| this.paste(clipboard, cx)).unwrap_or(false)
+            });
         div()
             .id("chat-composer")
             .key_context("ChatComposer")
@@ -766,6 +884,8 @@ impl Render for ComposerView {
             )
             .child(
                 div()
+                    .id("chat-composer-card")
+                    .debug_selector(|| "chat-composer-card".into())
                     .w_full()
                     .rounded(t.cz(16.0))
                     .border_1()
@@ -777,9 +897,18 @@ impl Render for ComposerView {
                     .flex()
                     .flex_col()
                     .overflow_hidden()
+                    .when(can_attach, |card| {
+                        card.drag_over::<ExternalPaths>(move |card, _, _, _| card.border_color(accent))
+                            .on_drop(cx.listener(|this, dropped: &ExternalPaths, window, cx| {
+                                this.attach_files(dropped.paths().iter().cloned(), cx);
+                                this.focus_editor(window, cx);
+                                cx.emit(ComposerEvent::FocusChanged(true));
+                            }))
+                    })
                     .children(self.render_plan(cx))
                     .children(self.render_approval(cx))
                     .children(self.render_question(cx))
+                    .children(self.render_attachments(cx))
                     .child(
                         div()
                             .px(t.cz(16.0))

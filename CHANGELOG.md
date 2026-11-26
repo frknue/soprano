@@ -338,6 +338,10 @@ the single source of truth for the version shown in **Settings ▸ About**.
   actions. Workspaces saved with depth layers reopen with each layer as its own tab.
 
 ### Fixed
+- **Drag-and-drop and paste attachments in Chat UI**: dropping screenshots or files from
+  Finder or the File Explorer onto a Chat UI composer or pane, or pasting copied images and
+  files (`⌘V`), now attaches them as thumbnails and chips and sends their paths with your
+  message (matching the Agent Dashboard composer).
 - **Antigravity (`agy`) sessions now appear in Project and Workspace History**: real
   Antigravity transcripts omit a top-level `cwd`, so the history indexer now infers each
   session's repository root and branch from tool call paths (and rebuilds cached rows
