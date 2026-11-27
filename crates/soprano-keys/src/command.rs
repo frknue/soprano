@@ -32,8 +32,10 @@ pub enum BindingCommand {
     CloseActivePaneTab,
     ToggleMaximize,
     StartCopyMode,
-    /// `new-window-current-directory` and `new-window`: create a logical window.
+    /// `new-window`: ask for a directory and create a logical window there.
     NewWindow,
+    /// `new-window-current-directory`: create a logical window in the active terminal directory.
+    NewWindowCurrentDirectory,
     NewSession,
     FindSession,
     /// `machine-terminal`: choose a machine and open a terminal on it beside the active pane.
@@ -105,7 +107,8 @@ impl BindingCommand {
             "kill-pane" | "close-active" => Self::CloseActivePaneTab,
             "maximize-pane" => Self::ToggleMaximize,
             "copy-mode" | "copy-mode-right-bracket" => Self::StartCopyMode,
-            "new-window-current-directory" | "new-window" => Self::NewWindow,
+            "new-window" => Self::NewWindow,
+            "new-window-current-directory" => Self::NewWindowCurrentDirectory,
             "new-session" => Self::NewSession,
             "find-session" => Self::FindSession,
             "machine-terminal" => Self::MachineTerminal,
@@ -277,7 +280,8 @@ mod tests {
         assert_eq!(command("close-active"), Some(BindingCommand::CloseActivePaneTab));
         assert_eq!(command("close-pane-tab-direct"), Some(BindingCommand::CloseActivePaneTab));
         assert_eq!(command("close-pane"), Some(BindingCommand::ClosePane));
-        assert_eq!(command("new-window-current-directory"), Some(BindingCommand::NewWindow));
+        assert_eq!(command("new-window"), Some(BindingCommand::NewWindow));
+        assert_eq!(command("new-window-current-directory"), Some(BindingCommand::NewWindowCurrentDirectory));
         assert_eq!(command("next-window-direct"), Some(BindingCommand::NextWindow));
         assert_eq!(command("copy-mode-right-bracket"), Some(BindingCommand::StartCopyMode));
         assert_eq!(command("resize-up"), Some(BindingCommand::Resize(NavigationDirection::Up)));

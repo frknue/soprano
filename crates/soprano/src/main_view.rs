@@ -6,6 +6,7 @@
 
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
+use std::path::PathBuf;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
@@ -140,7 +141,6 @@ pub struct MainView {
     right_sidebar: Entity<RightSidebar>,
     toasts: Entity<ToastStack>,
     picker: Option<Entity<Picker>>,
-    palette_actions: HashMap<SharedString, PaletteAction>,
     dialog: Option<Entity<Dialog>>,
     queued_dialogs: Vec<(DialogContent, DialogCompletion)>,
     settings: Option<Entity<SettingsView>>,
@@ -439,7 +439,6 @@ impl MainView {
             right_sidebar,
             toasts,
             picker: None,
-            palette_actions: HashMap::new(),
             dialog: None,
             queued_dialogs: Vec::new(),
             settings: None,
@@ -485,6 +484,7 @@ impl MainView {
                 self.show_picker(items, Some("Search sessions..."), Vec::new(), window, cx);
             }
             Command::OpenProjectSearch => self.open_project_search(window, cx),
+            Command::NewWindow => self.open_new_window_picker(window, cx),
             Command::NewSession => {
                 self.prompt_for_session_name("New Session", String::new(), None, window, cx)
             }
@@ -716,7 +716,8 @@ impl MainView {
             BindingCommand::CloseActivePaneTab => self.close_active_pane_tab(window, cx),
             BindingCommand::ToggleMaximize => ws.update(cx, |ws| ws.toggle_maximize()),
             BindingCommand::StartCopyMode => self.run(Command::StartCopyMode, window, cx),
-            BindingCommand::NewWindow => {
+            BindingCommand::NewWindow => self.run(Command::NewWindow, window, cx),
+            BindingCommand::NewWindowCurrentDirectory => {
                 ws.update(cx, |ws| ws.create_window(None, None));
             }
             BindingCommand::NewSession => self.run(Command::NewSession, window, cx),
@@ -1160,6 +1161,45 @@ impl MainView {
 
     // MARK: - Pickers
 
+    fn present_picker(
+        &mut self,
+        picker: Entity<Picker>,
+        on_confirm: impl Fn(&str, &str, &mut Window, &mut App) + 'static,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let on_confirm = Rc::new(on_confirm);
+        let subscription =
+            cx.subscribe_in(&picker, window, move |this, picker, event: &PickerEvent, window, cx| {
+                if this.picker.as_ref() != Some(picker) {
+                    return;
+                }
+                this.picker = None;
+                let confirmed = match event {
+                    PickerEvent::Confirmed { id, query } => Some((id.clone(), query.clone())),
+                    PickerEvent::Dismissed => None,
+                };
+                cx.notify();
+                match confirmed {
+                    // The palette closes first; the action runs on the next turn so a picker or
+                    // dialog it opens takes the keyboard.
+                    Some((id, query)) => {
+                        let on_confirm = on_confirm.clone();
+                        cx.defer_in(window, move |this, window, cx| {
+                            on_confirm(&id, &query, window, cx);
+                            if this.picker.is_none() && this.dialog.is_none() {
+                                this.sync_keyboard_focus(window, cx);
+                            }
+                        })
+                    }
+                    None => this.sync_keyboard_focus(window, cx),
+                }
+            });
+        self._subscriptions.push(subscription);
+        self.picker = Some(picker);
+        cx.notify();
+    }
+
     fn show_picker(
         &mut self,
         entries: Vec<PaletteEntry>,
@@ -1168,7 +1208,7 @@ impl MainView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.palette_actions =
+        let actions: HashMap<SharedString, PaletteAction> =
             entries.iter().map(|entry| (entry.item.id.clone(), entry.action.clone())).collect();
         let items = entries.into_iter().map(|entry| entry.item).collect();
         let picker = Picker::new(items, window, cx);
@@ -1178,35 +1218,75 @@ impl MainView {
             }
             picker.set_search_keycaps(search_keycaps);
         });
-        let subscription =
-            cx.subscribe_in(&picker, window, |this, picker, event: &PickerEvent, window, cx| {
-                if this.picker.as_ref() != Some(picker) {
-                    return;
+        self.present_picker(
+            picker,
+            move |id, query, window, cx| {
+                if let Some(action) = actions.get(id) {
+                    action(query, window, cx);
                 }
-                this.picker = None;
-                let action = match event {
-                    PickerEvent::Confirmed { id, query } => {
-                        this.palette_actions.get(id).cloned().map(|a| (a, query.clone()))
-                    }
-                    PickerEvent::Dismissed => None,
-                };
-                this.palette_actions.clear();
-                cx.notify();
-                match action {
-                    // The palette closes first; the action runs on the next turn so a picker or
-                    // dialog it opens takes the keyboard.
-                    Some((action, query)) => cx.defer_in(window, move |this, window, cx| {
-                        action(&query, window, cx);
-                        if this.picker.is_none() && this.dialog.is_none() {
-                            this.sync_keyboard_focus(window, cx);
+            },
+            window,
+            cx,
+        );
+    }
+
+    fn open_new_window_picker(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let roots = self.shell.read(cx).settings.project_directories.clone();
+        let caps = self.shell.read(cx).shortcut(&["new-window"]);
+        let (items, base_dir) = {
+            let ws = self.workspace.read(cx);
+            let items = palette::new_window_items(ws, &roots);
+            let base_dir = ws
+                .machine_of_pane(ws.active_pane_id())
+                .is_none()
+                .then(|| ws.active_working_directory())
+                .flatten()
+                .map(PathBuf::from)
+                .unwrap_or_else(soprano_platform::paths::home_dir);
+            (items, base_dir)
+        };
+        let picker = Picker::new(items, window, cx);
+        picker.update(cx, |picker, cx| {
+            picker.set_placeholder("Choose directory or type a path…", window, cx);
+            picker.set_search_keycaps(caps);
+            picker.set_query_items(
+                move |query| palette::directory_query_items(query, Some(base_dir.as_path())),
+                cx,
+            );
+            picker.set_tab_complete(palette::directory_tab_completion);
+        });
+        let workspace = self.workspace.clone();
+        self.present_picker(
+            picker,
+            move |id, _, _, cx| {
+                if id == palette::NEW_WINDOW_CURRENT_ID {
+                    workspace.update(cx, |ws| ws.create_window(None, None));
+                } else if id == palette::NEW_WINDOW_CHOOSE_ID {
+                    let workspace = workspace.clone();
+                    let paths = cx.prompt_for_paths(PathPromptOptions {
+                        files: false,
+                        directories: true,
+                        multiple: false,
+                        prompt: Some("New Window".into()),
+                    });
+                    cx.spawn(async move |cx| {
+                        if let Ok(Ok(Some(paths))) = paths.await
+                            && let Some(path) = paths.first()
+                        {
+                            let path = soprano_model::file_url::standardized_path(path)
+                                .to_string_lossy()
+                                .into_owned();
+                            cx.update(|cx| workspace.update(cx, |ws| ws.create_window(Some(&path), None)));
                         }
-                    }),
-                    None => this.sync_keyboard_focus(window, cx),
+                    })
+                    .detach();
+                } else if let Some(path) = id.strip_prefix(palette::NEW_WINDOW_PATH_PREFIX) {
+                    workspace.update(cx, |ws| ws.create_window(Some(path), None));
                 }
-            });
-        self._subscriptions.push(subscription);
-        self.picker = Some(picker);
-        cx.notify();
+            },
+            window,
+            cx,
+        );
     }
 
     fn open_command_palette(&mut self, window: &mut Window, cx: &mut Context<Self>) {

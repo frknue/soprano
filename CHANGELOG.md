@@ -234,6 +234,13 @@ the single source of truth for the version shown in **Settings ▸ About**.
   the command palette. Terminals and agents keep running while they move.
 
 ### Changed
+- **New Window directory picker**: **New Window…** (`⌘N`, the window tab row's `+` button,
+  the sidebar `+` menu, and the command palette) now asks for a directory with a searchable
+  picker listing the current directory, open workspace folders, configured
+  `projectDirectories`, typed paths with `Tab` subdirectory completion, and **Choose
+  Directory…** for the OS folder dialog. `⌃A` → `C` (**New Window Here**,
+  `new-window-current-directory`) continues to open immediately in the active terminal's
+  directory.
 - **Rich attachments in chat messages**: pictures and files attached to user messages in
   Chat UI and the Agent Dashboard now render as clickable image thumbnails and file chips
   above the message bubble (with full paths in hover tooltips) instead of showing raw file

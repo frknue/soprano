@@ -203,7 +203,7 @@ impl Sidebar {
     /// The Windows header's "+": a window, a pane of each agent (and each chat agent), a
     /// terminal (here and on each machine), a browser, a Markdown file (`plusClicked`).
     fn new_menu(&self, cx: &App) -> Vec<MenuItem> {
-        let mut items = vec![self.spawn_item("New Window".into(), |ws| _ = ws.create_window(None, None))];
+        let mut items = vec![self.command_item("New Window…", Command::NewWindow)];
         items.push(MenuItem::separator());
         for profile in AgentCatalog::shared().all().into_iter().filter(|p| p.id != "terminal") {
             let id = profile.id.clone();

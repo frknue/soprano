@@ -3,6 +3,7 @@
 //! `buildProjectPaletteItems`). The picker widget is soprano-ui's; this module decides what it
 //! lists and what each row does.
 
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
@@ -310,9 +311,19 @@ pub fn command_items(
             spec(
                 "new-window",
                 IconName::AppWindow,
-                "New Window",
-                "Create a new logical window",
+                "New Window…",
+                "Create a new logical window in a chosen directory",
                 short(&["new-window"]),
+            ),
+            command(shell, Command::NewWindow),
+        ),
+        entry(
+            spec(
+                "new-window-current-directory",
+                IconName::AppWindow,
+                "New Window Here",
+                "Create a logical window in the active terminal directory",
+                short(&["new-window-current-directory"]),
             ),
             mutate(workspace, |ws| {
                 ws.create_window(None, None);
@@ -1029,6 +1040,260 @@ pub fn project_items(
     entries
 }
 
+/// Row id for opening a new window in the active tab's place (e.g. a remote machine or default shell).
+pub const NEW_WINDOW_CURRENT_ID: &str = "new-window-current";
+/// Row id for opening the native OS folder chooser for a new window.
+pub const NEW_WINDOW_CHOOSE_ID: &str = "new-window-choose-directory";
+/// Row id prefix for a concrete local directory path.
+pub const NEW_WINDOW_PATH_PREFIX: &str = "path:";
+
+/// Maximum number of dynamic subdirectory completions shown while typing a path.
+const MAX_PATH_COMPLETIONS: usize = 50;
+
+fn folder_display_name(path: &str) -> String {
+    Path::new(path)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .filter(|name| !name.is_empty())
+        .map(str::to_owned)
+        .unwrap_or_else(|| path.to_owned())
+}
+
+fn ends_with_separator(raw: &str) -> bool {
+    raw.ends_with('/') || (cfg!(windows) && raw.ends_with('\\'))
+}
+
+fn looks_like_path(raw: &str) -> bool {
+    raw == "~"
+        || raw == "."
+        || raw == ".."
+        || raw.starts_with("~/")
+        || raw.starts_with('/')
+        || raw.starts_with("./")
+        || raw.starts_with("../")
+        || raw.contains('/')
+        || (cfg!(windows)
+            && (raw.starts_with("~\\")
+                || raw.starts_with(".\\")
+                || raw.starts_with("..\\")
+                || raw.contains('\\')
+                || Path::new(raw).is_absolute()))
+}
+
+fn resolve_typed_path(raw: &str, base_dir: Option<&Path>) -> Option<PathBuf> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let expanded = soprano_platform::paths::expand_tilde(trimmed);
+    let absolute = if expanded.is_absolute() { expanded } else { base_dir?.join(expanded) };
+    Some(soprano_platform::paths::normalize(&absolute))
+}
+
+fn directory_picker_item(path: &Path, icon: IconName) -> (String, PickerItem) {
+    let std_path = soprano_model::file_url::standardized_path(path).to_string_lossy().into_owned();
+    let label = folder_display_name(&std_path);
+    let description = soprano_config::config_file::abbreviating_home(&std_path);
+    let item = PickerItem::new(format!("{NEW_WINDOW_PATH_PREFIX}{std_path}"), label)
+        .icon(icon)
+        .description(description)
+        .search_text(std_path.clone());
+    (std_path, item)
+}
+
+/// "New Window…": current directory first, then open workspace folders, then configured
+/// `projectDirectories` subfolders, then the native folder chooser.
+pub fn new_window_items(workspace: &Workspace, roots: &[String]) -> Vec<PickerItem> {
+    let mut items = Vec::new();
+    let mut seen = HashSet::new();
+
+    let active_machine = workspace.machine_of_pane(workspace.active_pane_id()).map(str::to_owned);
+    let active_cwd = workspace.active_working_directory();
+    if let Some(machine) = active_machine {
+        let label =
+            active_cwd.as_deref().map(folder_display_name).unwrap_or_else(|| "Current Directory".to_owned());
+        let description = match &active_cwd {
+            Some(cwd) => format!("Current · {machine}:{cwd}"),
+            None => format!("Current · on {machine}"),
+        };
+        items.push(
+            PickerItem::new(NEW_WINDOW_CURRENT_ID, label)
+                .icon(IconName::Server)
+                .description(description)
+                .group("Current")
+                .search_text(format!(
+                    "current directory active here {machine} {}",
+                    active_cwd.as_deref().unwrap_or("")
+                )),
+        );
+    } else if let Some(cwd) = active_cwd {
+        let std_path =
+            soprano_model::file_url::standardized_path(Path::new(&cwd)).to_string_lossy().into_owned();
+        seen.insert(std_path.clone());
+        let label = folder_display_name(&std_path);
+        let abbrev = soprano_config::config_file::abbreviating_home(&std_path);
+        items.push(
+            PickerItem::new(format!("{NEW_WINDOW_PATH_PREFIX}{std_path}"), label)
+                .icon(IconName::Folder)
+                .description(format!("Current · {abbrev}"))
+                .group("Current")
+                .search_text(format!("current directory active here {std_path}")),
+        );
+    } else {
+        items.push(
+            PickerItem::new(NEW_WINDOW_CURRENT_ID, "Current Directory")
+                .icon(IconName::Folder)
+                .description("Default shell directory")
+                .group("Current")
+                .search_text("current directory active here default home"),
+        );
+    }
+
+    let open_dirs = workspace
+        .ordered_windows()
+        .into_iter()
+        .flat_map(|window| workspace.ordered_panes(&window.id))
+        .flat_map(|pane| pane.tabs.iter())
+        .filter(|tab| tab.pane_type != PaneType::Browser && tab.remote.is_none())
+        .filter_map(|tab| tab.cwd.as_deref())
+        .map(|cwd| {
+            soprano_model::file_url::standardized_path(&Workspace::project_root(cwd))
+                .to_string_lossy()
+                .into_owned()
+        });
+    for path in open_dirs {
+        if seen.insert(path.clone()) {
+            let abbrev = soprano_config::config_file::abbreviating_home(&path);
+            items.push(
+                PickerItem::new(format!("{NEW_WINDOW_PATH_PREFIX}{path}"), folder_display_name(&path))
+                    .icon(IconName::Folder)
+                    .description(abbrev)
+                    .group("Open")
+                    .search_text(path),
+            );
+        }
+    }
+
+    for project in projects(roots) {
+        if seen.insert(project.path.clone()) {
+            let abbrev = soprano_config::config_file::abbreviating_home(&project.path);
+            items.push(
+                PickerItem::new(format!("{NEW_WINDOW_PATH_PREFIX}{}", project.path), project.name)
+                    .icon(IconName::Folder)
+                    .description(abbrev)
+                    .group("Projects")
+                    .search_text(project.path),
+            );
+        }
+    }
+
+    items.push(
+        PickerItem::new(NEW_WINDOW_CHOOSE_ID, "Choose Directory…")
+            .icon(IconName::FolderPlus)
+            .description("Browse for any folder")
+            .group("Other")
+            .search_text("choose directory browse finder folder open path"),
+    );
+
+    items
+}
+
+/// Dynamic directory matches for a path typed into the New Window picker.
+///
+/// Resolves `~`, absolute paths, and paths relative to `base_dir`, listing the exact directory
+/// when it exists plus matching subdirectories when typing a partial path or trailing separator.
+pub fn directory_query_items(query: &str, base_dir: Option<&Path>) -> Vec<PickerItem> {
+    let trimmed = query.trim();
+    if trimmed.is_empty() {
+        return Vec::new();
+    }
+    let trailing_sep = ends_with_separator(trimmed);
+    let path_like = looks_like_path(trimmed);
+    let Some(resolved) = resolve_typed_path(trimmed, base_dir) else {
+        return Vec::new();
+    };
+
+    let mut items = Vec::new();
+    let mut seen = HashSet::new();
+    let mut push_dir = |dir: &Path, icon: IconName| {
+        let (std_path, item) = directory_picker_item(dir, icon);
+        if seen.insert(std_path) {
+            items.push(item);
+        }
+    };
+
+    if trailing_sep {
+        if resolved.is_dir() {
+            push_dir(&resolved, IconName::FolderOpen);
+            if let Ok(children) = std::fs::read_dir(&resolved) {
+                let mut dirs: Vec<(String, PathBuf)> = children
+                    .flatten()
+                    .filter_map(|entry| {
+                        let name = entry.file_name().to_string_lossy().into_owned();
+                        if name.starts_with('.') || !entry.path().is_dir() {
+                            return None;
+                        }
+                        Some((name, entry.path()))
+                    })
+                    .collect();
+                dirs.sort_by_key(|a| a.0.to_lowercase());
+                for (_, child) in dirs.into_iter().take(MAX_PATH_COMPLETIONS) {
+                    push_dir(&child, IconName::Folder);
+                }
+            }
+        }
+        return items;
+    }
+
+    if resolved.is_dir() {
+        push_dir(&resolved, IconName::FolderOpen);
+    }
+
+    if path_like
+        && !matches!(trimmed, "~" | "/" | "." | "..")
+        && let (Some(parent), Some(prefix)) =
+            (resolved.parent(), resolved.file_name().and_then(|name| name.to_str()))
+        && parent.is_dir()
+    {
+        let include_hidden = prefix.starts_with('.');
+        let needle = prefix.to_lowercase();
+        if let Ok(children) = std::fs::read_dir(parent) {
+            let mut matches: Vec<(bool, String, PathBuf)> = children
+                .flatten()
+                .filter_map(|entry| {
+                    let name = entry.file_name().to_string_lossy().into_owned();
+                    if (!include_hidden && name.starts_with('.')) || !entry.path().is_dir() {
+                        return None;
+                    }
+                    let lower = name.to_lowercase();
+                    if !lower.contains(&needle) {
+                        return None;
+                    }
+                    let is_prefix = lower.starts_with(&needle);
+                    Some((!is_prefix, lower, entry.path()))
+                })
+                .collect();
+            matches.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.cmp(&b.1)));
+            for (_, _, child) in matches.into_iter().take(MAX_PATH_COMPLETIONS) {
+                push_dir(&child, IconName::Folder);
+            }
+        }
+    }
+
+    items
+}
+
+/// Tab-completes a directory row in the New Window picker into an abbreviated path ending with a
+/// separator so its subdirectories appear immediately.
+pub fn directory_tab_completion(item: &PickerItem) -> Option<String> {
+    let path = item.id.strip_prefix(NEW_WINDOW_PATH_PREFIX)?;
+    let mut completed = soprano_config::config_file::abbreviating_home(path);
+    if !ends_with_separator(&completed) {
+        completed.push(std::path::MAIN_SEPARATOR);
+    }
+    Some(completed)
+}
+
 /// An agent row: title, subtitle, search text, keycaps, and what it opens.
 type AgentRow = (String, String, String, Vec<String>, Box<dyn Fn(&mut Workspace)>);
 
@@ -1056,5 +1321,105 @@ mod tests {
         let lowered: Vec<String> = names.iter().map(|n| n.to_lowercase()).collect();
         assert_eq!(lowered, ["alpha", "alpha", "beta"]);
         assert_eq!(names.len(), 3);
+    }
+
+    #[test]
+    fn new_window_items_put_current_directory_first_then_open_and_configured_projects() {
+        let root = tempfile::tempdir().expect("temp");
+        for name in ["alpha", "beta"] {
+            std::fs::create_dir_all(root.path().join(name).join(".git")).expect("project");
+        }
+        let current = tempfile::tempdir().expect("temp");
+        let path_str =
+            |p: &Path| soprano_model::file_url::standardized_path(p).to_string_lossy().into_owned();
+        let current_path = path_str(current.path());
+        let beta_path = path_str(&root.path().join("beta"));
+        let alpha_path = path_str(&root.path().join("alpha"));
+
+        let mut workspace = Workspace::new();
+        workspace.spawn_terminal(Some(&beta_path)).expect("beta pane");
+        workspace.spawn_terminal(Some(&current_path)).expect("current pane");
+
+        let items = new_window_items(&workspace, &[root.path().to_string_lossy().into_owned()]);
+        let ids: Vec<&str> = items.iter().map(|item| item.id.as_ref()).collect();
+        assert_eq!(
+            ids,
+            [
+                format!("{NEW_WINDOW_PATH_PREFIX}{current_path}").as_str(),
+                format!("{NEW_WINDOW_PATH_PREFIX}{beta_path}").as_str(),
+                format!("{NEW_WINDOW_PATH_PREFIX}{alpha_path}").as_str(),
+                NEW_WINDOW_CHOOSE_ID,
+            ]
+        );
+        assert!(items[0].description.starts_with("Current · "));
+        assert_eq!(items[0].group.as_deref(), Some("Current"));
+        assert_eq!(items[1].group.as_deref(), Some("Open"));
+        assert_eq!(items[2].group.as_deref(), Some("Projects"));
+        assert_eq!(items[3].group.as_deref(), Some("Other"));
+    }
+
+    #[test]
+    fn new_window_items_preserve_remote_active_place_without_listing_it_as_local() {
+        let mut workspace = Workspace::new();
+        workspace.spawn_terminal_on("vps").expect("remote pane");
+        let items = new_window_items(&workspace, &[]);
+        assert_eq!(items[0].id.as_ref(), NEW_WINDOW_CURRENT_ID);
+        assert!(items[0].description.contains("vps"));
+    }
+
+    #[test]
+    fn directory_query_items_resolve_typed_paths_and_complete_subdirectories() {
+        let root = tempfile::tempdir().expect("temp");
+        let alpha = root.path().join("alpha");
+        let alpha_two = root.path().join("alpha-two");
+        let beta = root.path().join("beta");
+        let hidden = root.path().join(".secret");
+        for dir in [&alpha, &alpha_two, &beta, &hidden] {
+            std::fs::create_dir(dir).expect("dir");
+        }
+        std::fs::write(root.path().join("alpha-file.txt"), "").expect("file");
+
+        let std = |p: &Path| {
+            format!(
+                "{NEW_WINDOW_PATH_PREFIX}{}",
+                soprano_model::file_url::standardized_path(p).to_string_lossy()
+            )
+        };
+
+        // Trailing separator lists the directory itself followed by visible subdirectories.
+        let listed = directory_query_items(&format!("{}/", root.path().display()), None);
+        let listed_ids: Vec<&str> = listed.iter().map(|i| i.id.as_ref()).collect();
+        assert_eq!(listed_ids, [std(root.path()), std(&alpha), std(&alpha_two), std(&beta)]);
+
+        // Partial path completes matching subdirectories (files and hidden dirs excluded).
+        let partial = directory_query_items(&format!("{}/alp", root.path().display()), None);
+        let partial_ids: Vec<&str> = partial.iter().map(|i| i.id.as_ref()).collect();
+        assert_eq!(partial_ids, [std(&alpha), std(&alpha_two)]);
+
+        // Explicit dot prefix includes hidden directories.
+        let dot = directory_query_items(&format!("{}/.sec", root.path().display()), None);
+        let dot_ids: Vec<&str> = dot.iter().map(|i| i.id.as_ref()).collect();
+        assert_eq!(dot_ids, [std(&hidden)]);
+
+        // Relative path resolves against base_dir.
+        let relative = directory_query_items("./beta", Some(root.path()));
+        let relative_ids: Vec<&str> = relative.iter().map(|i| i.id.as_ref()).collect();
+        assert_eq!(relative_ids, [std(&beta)]);
+
+        // Non-existent path yields no dynamic entries.
+        let missing = directory_query_items(&format!("{}/nope", root.path().display()), None);
+        assert!(missing.is_empty());
+    }
+
+    #[test]
+    fn directory_tab_completion_abbreviates_home_and_appends_separator() {
+        let home = soprano_platform::paths::home_dir();
+        let sub = home.join("projects");
+        let item = PickerItem::new(format!("{NEW_WINDOW_PATH_PREFIX}{}", sub.display()), "projects");
+        assert_eq!(
+            directory_tab_completion(&item),
+            Some(format!("~{sep}projects{sep}", sep = std::path::MAIN_SEPARATOR))
+        );
+        assert_eq!(directory_tab_completion(&PickerItem::new(NEW_WINDOW_CHOOSE_ID, "Choose")), None);
     }
 }

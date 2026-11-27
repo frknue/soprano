@@ -343,7 +343,7 @@ impl WindowTabRow {
     }
 
     pub fn add_window(&mut self, cx: &mut Context<Self>) {
-        self.workspace.update(cx, |workspace| workspace.create_window(None, None));
+        crate::shell::dispatch(&self.shell, Command::NewWindow, cx);
     }
 }
 
@@ -398,7 +398,7 @@ impl Render for WindowTabRow {
             .child(
                 trailing_drop_area(
                     "window-tab-drop",
-                    add_button("new-window-tab", "New Window", cx)
+                    add_button("new-window-tab", "New Window…", cx)
                         .on_click(cx.listener(|row, _, _, cx| row.add_window(cx))),
                     cx,
                 )
@@ -1123,7 +1123,7 @@ mod tests {
             assert!(rows.layout.read(cx).is_top(cx));
         });
         rows.mutate(|ws| ws.create_window(None, None));
-        rows.windows.update(&mut rows.cx, |row, cx| row.add_window(cx));
+        rows.mutate(|ws| ws.create_window(None, None));
         rows.shell.update(&mut rows.cx, |shell, cx| {
             shell.settings.hide_window_tabs = false;
             cx.notify();
@@ -1137,5 +1137,18 @@ mod tests {
         let first = rows.cx.read(|cx| window_tab_items(rows.workspace.read(cx))[0].id.clone());
         rows.windows.update(&mut rows.cx, |row, cx| row.activate(&first, cx));
         rows.cx.read(|cx| assert_eq!(rows.workspace.read(cx).active_window_id(), first));
+    }
+
+    #[gpui::test]
+    fn adding_a_window_dispatches_the_new_window_command(cx: &mut TestAppContext) {
+        let mut rows = rows(cx);
+        let commands = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+        let sink = commands.clone();
+        rows.cx.update(|_, cx| {
+            cx.subscribe(&rows.shell, move |_, command: &Command, _| sink.borrow_mut().push(command.clone()))
+                .detach();
+        });
+        rows.windows.update(&mut rows.cx, |row, cx| row.add_window(cx));
+        assert_eq!(*commands.borrow(), [Command::NewWindow]);
     }
 }

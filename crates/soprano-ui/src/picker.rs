@@ -5,11 +5,12 @@
 //! dismiss. Search and ranking port `CommandPaletteSearch` (`Views/CommandPalettePanel.swift`).
 
 use std::ops::Range;
+use std::rc::Rc;
 
 use gpui::{
     App, AppContext as _, Context, DismissEvent, ElementId, Entity, EventEmitter, FocusHandle, Focusable,
-    FontWeight, HighlightStyle, InteractiveElement, IntoElement, MouseButton, ParentElement, Render,
-    ScrollHandle, SharedString, StatefulInteractiveElement, Styled, StyledText, Subscription, Window,
+    FontWeight, HighlightStyle, InteractiveElement, IntoElement, KeyDownEvent, MouseButton, ParentElement,
+    Render, ScrollHandle, SharedString, StatefulInteractiveElement, Styled, StyledText, Subscription, Window,
     anchored, deferred, div, point, prelude::*, px,
 };
 use gpui_component::input::{self as component_input, InputEvent, InputState};
@@ -172,19 +173,27 @@ pub enum PickerRow {
     Item(usize),
 }
 
+/// Where a filtered result comes from: a dynamic item produced for the query, or a static item.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum PickerResult {
+    Extra(usize),
+    Static(usize),
+}
+
 /// The picker's state without a window: items, query, results and the keyboard selection.
 #[derive(Clone)]
 pub struct PickerState {
     items: Vec<PickerItem>,
+    extra_items: Vec<PickerItem>,
     query: String,
-    results: Vec<usize>,
+    results: Vec<PickerResult>,
     selected: usize,
 }
 
 impl PickerState {
     pub fn new(items: Vec<PickerItem>) -> Self {
-        let results = (0..items.len()).collect();
-        Self { items, query: String::new(), results, selected: 0 }
+        let results = (0..items.len()).map(PickerResult::Static).collect();
+        Self { items, extra_items: Vec::new(), query: String::new(), results, selected: 0 }
     }
 
     pub fn items(&self) -> &[PickerItem] {
@@ -195,22 +204,46 @@ impl PickerState {
         &self.query
     }
 
+    fn item(&self, result: PickerResult) -> &PickerItem {
+        match result {
+            PickerResult::Extra(i) => &self.extra_items[i],
+            PickerResult::Static(i) => &self.items[i],
+        }
+    }
+
     /// Filters for `query` and selects the first result.
     pub fn set_query(&mut self, query: &str) {
+        self.set_query_with_extra(query, Vec::new());
+    }
+
+    /// Updates `query` with dynamic items shown ahead of matching static items; static items
+    /// sharing an `id` with a dynamic item are omitted so nothing appears twice.
+    pub fn set_query_with_extra(&mut self, query: &str, extra_items: Vec<PickerItem>) {
         self.query = query.to_owned();
-        self.results = filter(&self.items, query);
+        self.extra_items = extra_items;
+        let filtered = filter(&self.items, query);
+        let mut results = Vec::with_capacity(self.extra_items.len() + filtered.len());
+        results.extend((0..self.extra_items.len()).map(PickerResult::Extra));
+        results.extend(
+            filtered
+                .into_iter()
+                .filter(|&i| !self.extra_items.iter().any(|extra| extra.id == self.items[i].id))
+                .map(PickerResult::Static),
+        );
+        self.results = results;
         self.selected = 0;
     }
 
     pub fn set_items(&mut self, items: Vec<PickerItem>) {
         self.items = items;
         let query = self.query.clone();
-        self.set_query(&query);
+        let extra = std::mem::take(&mut self.extra_items);
+        self.set_query_with_extra(&query, extra);
     }
 
     /// The matching items, best first.
     pub fn results(&self) -> impl Iterator<Item = &PickerItem> {
-        self.results.iter().map(|&i| &self.items[i])
+        self.results.iter().map(|&r| self.item(r))
     }
 
     pub fn result_count(&self) -> usize {
@@ -237,7 +270,7 @@ impl PickerState {
     }
 
     pub fn selected_item(&self) -> Option<&PickerItem> {
-        self.results.get(self.selected).map(|&i| &self.items[i])
+        self.results.get(self.selected).map(|&r| self.item(r))
     }
 
     /// The list rows: with an empty query, a head before each run of one group; while
@@ -246,9 +279,9 @@ impl PickerState {
         let grouped = normalized(&self.query).is_empty();
         let mut rows = Vec::with_capacity(self.results.len() + 4);
         let mut group: Option<&SharedString> = None;
-        for (position, &index) in self.results.iter().enumerate() {
+        for (position, &result) in self.results.iter().enumerate() {
             if grouped
-                && let Some(item_group) = &self.items[index].group
+                && let Some(item_group) = &self.item(result).group
                 && group != Some(item_group)
             {
                 rows.push(PickerRow::Head(item_group.clone()));
@@ -269,6 +302,11 @@ pub enum PickerEvent {
     Dismissed,
 }
 
+/// Produces dynamic items for the current search text (e.g., typed filesystem paths).
+pub type QueryItemsProvider = Rc<dyn Fn(&str) -> Vec<PickerItem>>;
+/// Returns replacement query text when Tab is pressed on the selected item.
+pub type TabCompleteProvider = Rc<dyn Fn(&PickerItem) -> Option<String>>;
+
 /// The picker overlay. Render the entity in the window root; it emits [`PickerEvent`] and then
 /// [`DismissEvent`] once.
 pub struct Picker {
@@ -276,6 +314,8 @@ pub struct Picker {
     input: Entity<InputState>,
     title: Option<SharedString>,
     search_keycaps: Vec<String>,
+    query_items: Option<QueryItemsProvider>,
+    tab_complete: Option<TabCompleteProvider>,
     width: f32,
     top: f32,
     scroll: ScrollHandle,
@@ -309,7 +349,7 @@ impl Picker {
                     match event {
                         InputEvent::Change => {
                             let query = input.read(cx).value().to_string();
-                            this.state.set_query(&query);
+                            this.apply_query(&query);
                             this.scroll.scroll_to_item(0);
                             cx.notify();
                         }
@@ -323,6 +363,8 @@ impl Picker {
                 input,
                 title: None,
                 search_keycaps: Vec::new(),
+                query_items: None,
+                tab_complete: None,
                 width: 620.0,
                 top: 60.0,
                 scroll: ScrollHandle::new(),
@@ -353,6 +395,23 @@ impl Picker {
         self.search_keycaps = caps;
     }
 
+    /// Supplies dynamic items for each search query, placed ahead of matching static items.
+    pub fn set_query_items(
+        &mut self,
+        provider: impl Fn(&str) -> Vec<PickerItem> + 'static,
+        cx: &mut Context<Self>,
+    ) {
+        self.query_items = Some(Rc::new(provider));
+        let query = self.state.query().to_owned();
+        self.apply_query(&query);
+        cx.notify();
+    }
+
+    /// Enables Tab to replace the search text with a completion derived from the selected item.
+    pub fn set_tab_complete(&mut self, complete: impl Fn(&PickerItem) -> Option<String> + 'static) {
+        self.tab_complete = Some(Rc::new(complete));
+    }
+
     /// Width and top offset in designed px (palette 620/60, Go-to picker 640/40).
     pub fn set_frame(&mut self, width: f32, top: f32) {
         self.width = width;
@@ -361,11 +420,29 @@ impl Picker {
 
     pub fn set_items(&mut self, items: Vec<PickerItem>, cx: &mut Context<Self>) {
         self.state.set_items(items);
+        let query = self.state.query().to_owned();
+        self.apply_query(&query);
         cx.notify();
     }
 
     pub fn state(&self) -> &PickerState {
         &self.state
+    }
+
+    fn apply_query(&mut self, query: &str) {
+        let extra = self.query_items.as_ref().map(|provider| provider(query)).unwrap_or_default();
+        self.state.set_query_with_extra(query, extra);
+    }
+
+    fn complete_with_tab(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        let Some(provider) = self.tab_complete.clone() else { return false };
+        let Some(item) = self.state.selected_item() else { return false };
+        let Some(replacement) = provider(item) else { return false };
+        self.input.update(cx, |input, cx| input.set_value(replacement.clone(), window, cx));
+        self.apply_query(&replacement);
+        self.scroll.scroll_to_item(0);
+        cx.notify();
+        true
     }
 
     fn move_selection(&mut self, delta: isize, cx: &mut Context<Self>) {
@@ -409,7 +486,7 @@ impl Picker {
     fn render_row(&self, position: usize, cx: &mut Context<Self>) -> gpui::AnyElement {
         let theme = cx.soprano_theme();
         let z = |v: f32| theme.z(v);
-        let item = &self.state.items[self.state.results[position]];
+        let item = self.state.item(self.state.results[position]);
         let selected = position == self.state.selected_index();
         let typing = !normalized(self.state.query()).is_empty();
         let title_color = if selected { theme.foreground } else { theme.muted };
@@ -538,6 +615,13 @@ impl Render for Picker {
             .text_size(z(size::UI))
             .text_color(theme.foreground)
             .key_context("SopranoPicker")
+            .capture_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
+                let m = event.keystroke.modifiers;
+                let bare = !(m.control || m.alt || m.shift || m.platform);
+                if bare && event.keystroke.key == "tab" && this.complete_with_tab(window, cx) {
+                    cx.stop_propagation();
+                }
+            }))
             .capture_action(cx.listener(|this, _: &component_input::MoveUp, _, cx| {
                 cx.stop_propagation();
                 this.move_selection(-1, cx);
@@ -715,6 +799,21 @@ mod tests {
     }
 
     #[test]
+    fn dynamic_query_items_appear_first_and_deduplicate_static_items() {
+        let mut state = PickerState::new(vec![
+            item("path:/tmp/alpha", "alpha", None),
+            item("path:/tmp/beta", "beta", None),
+        ]);
+        state.set_query_with_extra(
+            "alpha",
+            vec![item("path:/tmp/alpha", "alpha", None), item("path:/tmp/alpha-2", "alpha-2", None)],
+        );
+        let ids: Vec<&str> = state.results().map(|entry| entry.id.as_ref()).collect();
+        assert_eq!(ids, ["path:/tmp/alpha", "path:/tmp/alpha-2"]);
+        assert_eq!(state.selected_item().map(|entry| entry.id.as_ref()), Some("path:/tmp/alpha"));
+    }
+
+    #[test]
     fn the_selection_stays_within_the_results_and_resets_on_a_new_query() {
         let mut state = PickerState::new(vec![item("a", "Alpha", None), item("b", "Beta", None)]);
         state.move_selection(-1);
@@ -809,6 +908,27 @@ mod tests {
             let (_, events, cx) = setup(cx);
             cx.simulate_keystrokes("escape");
             assert_eq!(*events.borrow(), [PickerEvent::Dismissed]);
+        }
+
+        #[gpui::test]
+        fn tab_completion_replaces_the_query_and_refreshes_dynamic_items(cx: &mut TestAppContext) {
+            let (picker, events, cx) = setup(cx);
+            picker.update(cx, |picker, cx| {
+                picker.set_query_items(
+                    |query| match query {
+                        "~/git/" => vec![PickerItem::new("path:/tmp/git/soprano", "soprano")],
+                        _ => Vec::new(),
+                    },
+                    cx,
+                );
+                picker.set_tab_complete(|item| (item.id == "one").then(|| "~/git/".to_owned()));
+            });
+            cx.simulate_keystrokes("tab");
+            cx.simulate_keystrokes("enter");
+            assert_eq!(
+                *events.borrow(),
+                [PickerEvent::Confirmed { id: "path:/tmp/git/soprano".into(), query: "~/git/".into() }]
+            );
         }
     }
 }

@@ -313,7 +313,7 @@ there; bind one in `settings.json`).
 | `⌃A` → `⇧L` | Jump to the most recently active logical window; press again to toggle back |
 | `⌃1`…`⌃9` | Select logical window 1–9 |
 | `⌃⇧` + the letters shown in the sidebar | Select the matching pane across windows in the current session |
-| `⌘N` | New logical window |
+| `⌘N` | New logical window (asks for a directory) |
 | `⌃A` → `C` | New logical window in the active terminal's directory |
 | `⇧⌘R` / `⇧⌘W` | Rename / close the active logical window |
 | `⌃Tab` / `⌃⇧Tab` | Next / previous tab (wraps around) |

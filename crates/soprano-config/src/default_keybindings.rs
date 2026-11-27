@@ -106,7 +106,7 @@ const TABLE: &[Row] = &[
     ("command-palette", "Commands", "Open the command palette", General, "⌘P", Direct, "p", CMD),
     ("find-window", "Find Window", "Search and switch to a logical window", General, "⌘F", Direct, "f", CMD),
     ("open-project", "Open Project", "Open a project directory", General, "⇧⌘P", Direct, "p", CMD_SHIFT),
-    ("new-window", "New Window", "Create a new logical window", General, "⌘N", Direct, "n", CMD),
+    ("new-window", "New Window…", "Create a new logical window in a chosen directory", General, "⌘N", Direct, "n", CMD),
     ("rename-window", "Rename Window", "Rename the active logical window", General, "⇧⌘R", Direct, "r", CMD_SHIFT),
     ("close-window", "Close Window", "Close the active logical window", General, "⇧⌘W", Direct, "w", CMD_SHIFT),
     ("new-terminal", "New Terminal", "Open a new terminal pane beside the focused pane", General, "⌘D", Direct, "d", CMD),

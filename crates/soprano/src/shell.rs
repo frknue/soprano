@@ -66,6 +66,8 @@ pub enum Command {
     FindWindow,
     FindSession,
     OpenProjectSearch,
+    /// Ask for a directory and open a new logical window there.
+    NewWindow,
     NewSession,
     /// Choose a machine (`machines` in settings.json) and open a terminal on it.
     MachineTerminal,
