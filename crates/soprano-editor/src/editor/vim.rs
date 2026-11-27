@@ -5,6 +5,7 @@
 
 use std::hash::Hash;
 use std::ops::Range;
+use std::time::{Duration, Instant};
 
 use gpui::{App, ClipboardItem, Context, KeyDownEvent, Window};
 use soprano_text::EditorDocument;
@@ -90,7 +91,13 @@ pub(super) struct VimState {
     pub pending: VimPending,
     pub register: VimRegister,
     pub last_find: Option<LastCharFind>,
+    /// A `j` typed in Insert mode: where it went and when, so a following `k` can turn the
+    /// pair into Escape.
+    pub insert_j: Option<(usize, Instant)>,
 }
+
+/// How long after `j` a `k` still counts as the `jk` escape (Vim's default `timeoutlen`).
+const JK_TIMEOUT: Duration = Duration::from_millis(1000);
 
 impl VimState {
     pub fn clear_pending(&mut self) {
@@ -705,8 +712,31 @@ impl<T: Clone + Eq + Hash + 'static> EditorView<T> {
             return;
         }
 
-        // In Insert mode, every other key goes straight through to normal typing / bindings.
+        // In Insert mode, every other key goes straight through to normal typing / bindings,
+        // except `k` right after a typed `j`: the pair leaves Insert mode like Escape.
         if self.vim.mode == VimMode::Insert {
+            let plain = !ks.modifiers.control && !ks.modifiers.shift && !ks.modifiers.function;
+            let insert_j = self.vim.insert_j.take();
+            if plain && ks.key == "k" && self.marked.is_none() && self.anchor == self.head {
+                let typed_j = insert_j.filter(|(at, when)| {
+                    when.elapsed() <= JK_TIMEOUT
+                        && self.head == at + 1
+                        && self
+                            .with_document(cx, |doc| doc.rope().get_byte(*at) == Some(b'j'))
+                            .unwrap_or(false)
+                });
+                if let Some((at, _)) = typed_j {
+                    self.anchor = at;
+                    self.head = at + 1;
+                    self.replace_selection("", true, cx);
+                    self.exit_to_normal_mode(cx);
+                    cx.stop_propagation();
+                    return;
+                }
+            }
+            if plain && ks.key == "j" && self.marked.is_none() {
+                self.vim.insert_j = Some((self.selected_range().start, Instant::now()));
+            }
             return;
         }
 

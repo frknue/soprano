@@ -478,3 +478,28 @@ async fn vim_mode_is_enabled_by_default_and_supports_motions_operators_and_visua
     cx.simulate_input("// ");
     assert_eq!(view.read_with(cx, |v, cx| v.text(cx)), "// let alpha = \"vim\";\nlet gamma = 3;\n");
 }
+
+#[gpui::test]
+async fn typing_jk_in_insert_mode_returns_to_normal_mode_without_inserting_the_j(cx: &mut TestAppContext) {
+    setup(cx);
+    let (_root, path) = file("jk.rs", "ab\n");
+    let documents = cx.new(|_| EditorDocuments::<&'static str>::new());
+    let (view, _, mut window_cx) = open(cx, &documents, "tab", &path);
+    let cx = &mut window_cx;
+    view.update_in(cx, |view, window, cx| view.focus.focus(window, cx));
+
+    // `j` followed by another key, or `k` on its own, types normally.
+    cx.simulate_keystrokes("i j x k");
+    assert_eq!(view.read_with(cx, |v, _| v.vim_mode()), VimMode::Insert);
+    assert_eq!(view.read_with(cx, |v, cx| v.text(cx)), "jxkab\n");
+
+    // `jk` drops the `j` and leaves Insert mode with the cursor on the last typed character.
+    cx.simulate_keystrokes("j k");
+    assert_eq!(view.read_with(cx, |v, _| v.vim_mode()), VimMode::Normal);
+    assert_eq!(view.read_with(cx, |v, cx| v.text(cx)), "jxkab\n");
+    assert_eq!(view.read_with(cx, |v, _| v.head), 2);
+
+    // Back in Normal mode, `j` and `k` are motions again.
+    cx.simulate_keystrokes("j k");
+    assert_eq!(view.read_with(cx, |v, cx| v.text(cx)), "jxkab\n");
+}

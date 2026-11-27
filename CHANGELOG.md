@@ -20,7 +20,8 @@ the single source of truth for the version shown in **Settings ▸ About**.
   (`h`/`j`/`k`/`l`, `w`/`W`/`b`/`B`/`e`/`E`, `0`/`^`/`$`, `gg`/`G`, `Ctrl+d`/`u`/`f`/`b`,
   `f`/`F`/`t`/`T`/`;`/`,`, `%`), operators (`d`, `c`, `y`, `>`, `<`, `r`, `~`, `x`/`X`,
   `p`/`P`, `o`/`O`, `J`, `u`/`Ctrl+r`), text objects (`iw`/`aw`, quotes, `()`/`[]`/`{}`/`<>`),
-  and `/` / `n` / `N` / `*` search.
+  and `/` / `n` / `N` / `*` search. Typing `jk` in Insert mode returns to Normal mode like
+  Escape.
 - **Git branch switcher in the composer**: click the `[GitBranch] <branch>` chip beneath the
   Chat UI or Agent Dashboard composer to search local branches, see relative last-commit
   times and branches already checked out in other worktrees, copy the current branch name,
