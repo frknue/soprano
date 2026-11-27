@@ -14,11 +14,16 @@ pub struct Adjustments {
     pub arguments: Vec<String>,
 }
 
+/// Called just before an agent pane launches so the accounts controller can
+/// perform launch-time selection (e.g. Claude Code automatic usage balancing).
+pub(crate) type PrepareLaunch = Arc<dyn Fn(&str) + Send + Sync>;
+
 #[derive(Default)]
 struct Choices {
     codex_home: Option<PathBuf>,
     codex_source: Option<PathBuf>,
     omp_overlay: Option<PathBuf>,
+    prepare_launch: Option<PrepareLaunch>,
 }
 
 /// Lock-protected rather than tied to the UI thread: launch configs are
@@ -43,12 +48,38 @@ impl AccountLaunchState {
 
     pub fn update(&self, codex_home: Option<PathBuf>, codex_source: PathBuf, omp_overlay: Option<PathBuf>) {
         let mut choices = self.choices.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-        *choices = Choices { codex_home, codex_source: Some(codex_source), omp_overlay };
+        choices.codex_home = codex_home;
+        choices.codex_source = Some(codex_source);
+        choices.omp_overlay = omp_overlay;
+    }
+
+    pub(crate) fn set_prepare_launch(&self, hook: PrepareLaunch) {
+        let mut choices = self.choices.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        choices.prepare_launch = Some(hook);
     }
 
     /// The environment and arguments for an agent pane of `profile_id`
-    /// (`codex`, `omp`; every other agent starts untouched).
+    /// (`codex`, `omp`; runs launch-time account selection when enabled for
+    /// `claude-code`; every other agent starts untouched).
     pub fn adjustments(&self, profile_id: &str) -> Adjustments {
+        self.adjustments_with_options(profile_id, true)
+    }
+
+    /// Like [`Self::adjustments`], without running launch-time account switching
+    /// (for background probes that inspect agent options rather than starting a session).
+    pub fn adjustments_for_probe(&self, profile_id: &str) -> Adjustments {
+        self.adjustments_with_options(profile_id, false)
+    }
+
+    fn adjustments_with_options(&self, profile_id: &str, prepare_launch: bool) -> Adjustments {
+        let hook = if prepare_launch {
+            self.choices.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).prepare_launch.clone()
+        } else {
+            None
+        };
+        if let Some(hook) = hook {
+            hook(profile_id);
+        }
         let (codex_home, codex_source, omp_overlay) = {
             let choices = self.choices.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
             (choices.codex_home.clone(), choices.codex_source.clone(), choices.omp_overlay.clone())

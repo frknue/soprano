@@ -54,6 +54,9 @@ impl AccountsSource for DemoAccounts {
     fn select(&self, account_id: Option<&str>, list: AccountListId) {
         println!("select {account_id:?} in {list:?}");
     }
+    fn select_automatic(&self, list: AccountListId) {
+        println!("select automatic in {list:?}");
+    }
     fn remove(&self, account_id: &str, _: AccountListId) {
         println!("remove {account_id}");
     }

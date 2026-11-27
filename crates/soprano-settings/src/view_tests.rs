@@ -80,6 +80,9 @@ impl AccountsSource for FakeAccounts {
     fn select(&self, account_id: Option<&str>, list: AccountListId) {
         self.record(format!("select {} in {}", account_id.unwrap_or("default"), list_name(list)));
     }
+    fn select_automatic(&self, list: AccountListId) {
+        self.record(format!("select automatic in {}", list_name(list)));
+    }
     fn remove(&self, account_id: &str, _: AccountListId) {
         self.record(format!("remove {account_id}"));
     }

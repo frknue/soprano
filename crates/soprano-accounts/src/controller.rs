@@ -36,6 +36,9 @@ use crate::usage_api::{self, UsageCredential};
 pub const POLL_INTERVAL_SECONDS: f64 = 300.0;
 /// A non-forced refresh within this long of the last one does nothing.
 pub const MINIMUM_REFRESH_INTERVAL_SECONDS: f64 = 30.0;
+/// Maximum time a Claude Code launch waits for fresh parallel usage lookups
+/// before falling back to the last known usage figures.
+const LAUNCH_USAGE_TIMEOUT: Duration = Duration::from_secs(3);
 
 /// Receives every new snapshot, on the thread that changed it (a background
 /// thread for refreshes and sign-ins); a UI host forwards it to its own thread.
@@ -145,22 +148,27 @@ impl AccountsController {
         let agy =
             AgyAccountManager::new(parts.store.clone(), agy_keyring, parts.secrets, parts.runner.clone());
         let omp = OmpAccountManager::new(parts.store.clone(), parts.runner, parts.paths.clone());
-        Self {
-            inner: Arc::new(Inner {
-                shared: Mutex::new(Shared::default()),
-                idle: Condvar::new(),
-                observers: Mutex::new(BTreeMap::new()),
-                actions: Mutex::new(None),
-                store: parts.store,
-                paths: parts.paths,
-                launch_state: parts.launch_state,
-                claude,
-                codex,
-                agy,
-                omp,
-                usage: parts.usage,
-            }),
-        }
+        let inner = Arc::new(Inner {
+            shared: Mutex::new(Shared::default()),
+            idle: Condvar::new(),
+            observers: Mutex::new(BTreeMap::new()),
+            actions: Mutex::new(None),
+            store: parts.store,
+            paths: parts.paths,
+            launch_state: parts.launch_state,
+            claude,
+            codex,
+            agy,
+            omp,
+            usage: parts.usage,
+        });
+        let weak = Arc::downgrade(&inner);
+        inner.launch_state.set_prepare_launch(Arc::new(move |profile_id: &str| {
+            if let Some(inner) = weak.upgrade() {
+                inner.prepare_launch(profile_id);
+            }
+        }));
+        Self { inner }
     }
 
     /// Called once at launch: makes the omp overlay exist before any omp
@@ -242,6 +250,7 @@ impl AccountsController {
         self.inner.mutate(|snapshot| {
             if let Some(entry) = snapshot.lists.get_mut(&list) {
                 entry.selected_account_id = account_id.map(str::to_owned);
+                entry.is_automatic = false;
             }
         });
         let account_id = account_id.map(str::to_owned);
@@ -251,6 +260,24 @@ impl AccountsController {
             AccountTool::AgyCli => inner.agy.select(account_id.as_deref()),
             AccountTool::Omp => inner.omp.select(account_id.as_deref(), list.provider),
         });
+    }
+
+    /// Enables automatic usage-based selection for `list` (Claude Code picks
+    /// the account with the most remaining usage on launch; omp uses its
+    /// built-in automatic balancing).
+    pub fn select_automatic(&self, list: AccountListId) {
+        match list.tool {
+            AccountTool::ClaudeCode => {
+                self.inner.mutate(|snapshot| {
+                    if let Some(entry) = snapshot.lists.get_mut(&list) {
+                        entry.is_automatic = true;
+                    }
+                });
+                Inner::perform(&self.inner, list, |inner| inner.claude.set_automatic(true));
+            }
+            AccountTool::Omp => self.select(None, list),
+            AccountTool::CodexCli | AccountTool::AgyCli => {}
+        }
     }
 
     pub fn remove(&self, account_id: &str, list: AccountListId) {
@@ -581,6 +608,184 @@ impl Inner {
             (!self.store.state().omp_preferred.is_empty()).then(|| self.paths.omp_overlay_file()),
         );
     }
+
+    fn prepare_launch(&self, profile_id: &str) {
+        if profile_id == "claude-code" && self.store.state().claude_code.automatic {
+            self.prepare_claude_launch();
+        }
+    }
+
+    /// Launch-time check for Claude Code Automatic mode: fetches fresh usage
+    /// for stored Claude Code logins in parallel (bounded by
+    /// `LAUNCH_USAGE_TIMEOUT`), picks the account with the lowest tightest-window
+    /// utilization, and switches Claude Code to it before the pane spawns.
+    fn prepare_claude_launch(&self) {
+        let mut claude_list = self.claude.list();
+        if claude_list.unavailable_reason.is_some() || !claude_list.is_automatic {
+            return;
+        }
+        let candidate_count = claude_list
+            .system_default
+            .as_ref()
+            .filter(|row| !row.identity.email.is_empty())
+            .into_iter()
+            .count()
+            + claude_list.accounts.len();
+        if candidate_count == 0 {
+            return;
+        }
+        if candidate_count == 1 {
+            let only_is_active = match claude_list.selected_account_id.as_deref() {
+                None => claude_list.system_default.as_ref().is_some_and(|row| !row.identity.email.is_empty()),
+                Some(id) => claude_list.accounts.iter().any(|row| row.id == id),
+            };
+            if only_is_active {
+                return;
+            }
+        }
+
+        let fresh = self.fetch_claude_usage_for_launch();
+        let now = Utc::now();
+        let (previous_claude, omp_claude) = {
+            let mut shared = self.lock();
+            for (row_id, usage) in &fresh {
+                if usage.is_some() {
+                    let key = format!("{}|{row_id}", AccountTool::ClaudeCode.raw_value());
+                    shared.direct_usage.insert(key, (now, usage.clone()));
+                }
+            }
+            (
+                shared.snapshot.lists.get(&AccountListId::CLAUDE_CODE).cloned(),
+                shared.snapshot.lists.get(&AccountListId::OMP_CLAUDE).cloned(),
+            )
+        };
+
+        let resolve_usage = |row: &AccountRow| -> Option<AccountUsage> {
+            if row.identity.email.is_empty() {
+                return None;
+            }
+            if let Some(Some(usage)) = fresh.get(&row.id) {
+                return Some(usage.clone());
+            }
+            if let Some(previous) = previous_claude.as_ref() {
+                let cached = if row.id == crate::claude::SYSTEM_DEFAULT_ROW_ID {
+                    previous.system_default.as_ref()
+                } else {
+                    previous.accounts.iter().find(|candidate| candidate.id == row.id)
+                };
+                if let Some(usage) = cached
+                    .filter(|candidate| candidate.identity.matches(&row.identity))
+                    .and_then(|candidate| candidate.usage.clone())
+                {
+                    return Some(usage);
+                }
+            }
+            omp_claude.as_ref().and_then(|omp| {
+                omp.accounts
+                    .iter()
+                    .find(|candidate| candidate.identity.matches(&row.identity))
+                    .and_then(|candidate| candidate.usage.clone())
+            })
+        };
+
+        if let Some(system_default) = claude_list.system_default.as_mut() {
+            system_default.usage = resolve_usage(system_default);
+        }
+        for row in &mut claude_list.accounts {
+            row.usage = resolve_usage(row);
+        }
+
+        let mut switch_error: Option<String> = None;
+        if let Some(target) = pick_roomiest_claude_account(&claude_list).map(|id| id.map(str::to_owned))
+            && target != claude_list.selected_account_id
+        {
+            match self.claude.select_automatic_target(target.as_deref()) {
+                Ok(()) => claude_list.selected_account_id = target,
+                Err(error) => switch_error = Some(error.to_string()),
+            }
+        }
+
+        self.mutate(|snapshot| {
+            snapshot.lists.insert(AccountListId::CLAUDE_CODE, claude_list);
+            match switch_error {
+                Some(message) => {
+                    snapshot.errors.insert(AccountListId::CLAUDE_CODE, message);
+                }
+                None => {
+                    snapshot.errors.remove(&AccountListId::CLAUDE_CODE);
+                }
+            }
+        });
+    }
+
+    fn fetch_claude_usage_for_launch(&self) -> HashMap<String, Option<AccountUsage>> {
+        let credentials = self.claude.usage_credentials();
+        if credentials.is_empty() {
+            return HashMap::new();
+        }
+        let expected = credentials.len();
+        let (tx, rx) = mpsc::channel();
+        for credential in credentials {
+            let fetcher = Arc::clone(&self.usage);
+            let tx = tx.clone();
+            thread::spawn(move || {
+                let fetched = fetcher(AccountProvider::Claude, &credential);
+                let _ = tx.send((credential.row_id, fetched));
+            });
+        }
+        drop(tx);
+        let deadline = Instant::now() + LAUNCH_USAGE_TIMEOUT;
+        let mut results = HashMap::with_capacity(expected);
+        while results.len() < expected {
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
+                break;
+            }
+            match rx.recv_timeout(remaining) {
+                Ok((row_id, usage)) => {
+                    results.insert(row_id, usage);
+                }
+                Err(_) => break,
+            }
+        }
+        results
+    }
+}
+
+/// Picks the Claude Code account (`None` = System default, `Some(id)` = managed
+/// account) with the lowest tightest-window `used_fraction`.
+///
+/// Accounts without usage data (or an unsigned-in System default) are skipped.
+/// Ties keep the currently active account so Soprano does not rewrite
+/// credentials unnecessarily. Returns `None` when no account has usage data.
+pub(crate) fn pick_roomiest_claude_account(list: &AccountList) -> Option<Option<&str>> {
+    let fraction = |row: &AccountRow| -> Option<f64> {
+        let used = row.usage.as_ref()?.tightest()?.used_fraction;
+        used.is_finite().then_some(used)
+    };
+    let mut candidates: Vec<(Option<&str>, f64)> = Vec::new();
+    if let Some(system_default) = list.system_default.as_ref()
+        && !system_default.identity.email.is_empty()
+        && let Some(used) = fraction(system_default)
+    {
+        candidates.push((None, used));
+    }
+    for row in &list.accounts {
+        if let Some(used) = fraction(row) {
+            candidates.push((Some(row.id.as_str()), used));
+        }
+    }
+    if candidates.is_empty() {
+        return None;
+    }
+    let current = list.selected_account_id.as_deref();
+    let mut best = candidates.iter().copied().find(|(id, _)| *id == current).unwrap_or(candidates[0]);
+    for (id, used) in candidates {
+        if used < best.1 {
+            best = (id, used);
+        }
+    }
+    Some(best.0)
 }
 
 /// The action queue's worker: runs each action as long as the controller lives.
@@ -889,5 +1094,162 @@ mod tests {
             snapshot.headline(AccountProvider::Codex).map(|(row, _)| row.id.as_str()),
             Some("system-default")
         );
+    }
+
+    #[test]
+    fn picking_the_roomiest_claude_account_chooses_lowest_tightest_usage_and_keeps_ties() {
+        let row = |id: &str, email: &str, windows: &[(&str, f64)]| AccountRow {
+            id: id.into(),
+            identity: AccountIdentity::new(email, None),
+            usage: (!windows.is_empty()).then(|| AccountUsage {
+                windows: windows
+                    .iter()
+                    .map(|(label, used)| UsageWindow {
+                        label: (*label).into(),
+                        used_fraction: *used,
+                        resets_at: None,
+                    })
+                    .collect(),
+                fetched_at: Utc::now(),
+            }),
+            ..AccountRow::default()
+        };
+
+        // 7% beats 10%.
+        let mut list = AccountList::new(AccountListId::CLAUDE_CODE);
+        list.system_default = Some(row("system-default", "a@x", &[("5h", 0.10)]));
+        list.accounts = vec![row("b", "b@x", &[("5h", 0.07)])];
+        list.selected_account_id = None;
+        assert_eq!(pick_roomiest_claude_account(&list), Some(Some("b")));
+
+        // Multi-window: tightest window decides (b has 7d 80%, a has 5h 15% / 7d 20%).
+        list.system_default = Some(row("system-default", "a@x", &[("5h", 0.15), ("7d", 0.20)]));
+        list.accounts = vec![row("b", "b@x", &[("5h", 0.05), ("7d", 0.80)])];
+        list.selected_account_id = Some("b".into());
+        assert_eq!(pick_roomiest_claude_account(&list), Some(None));
+
+        // Tie keeps the currently active account.
+        list.system_default = Some(row("system-default", "a@x", &[("5h", 0.07)]));
+        list.accounts = vec![row("b", "b@x", &[("5h", 0.07)])];
+        list.selected_account_id = Some("b".into());
+        assert_eq!(pick_roomiest_claude_account(&list), Some(Some("b")));
+
+        // Unsigned-in system default is skipped; missing usage returns None when none exist.
+        list.system_default = Some(row("system-default", "", &[]));
+        list.accounts = vec![row("b", "b@x", &[])];
+        assert_eq!(pick_roomiest_claude_account(&list), None);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn claude_code_automatic_mode_checks_usage_on_launch_and_switches_to_the_roomiest_account() {
+        let root = tempfile::tempdir().unwrap();
+        let bin = root.path().join("bin");
+        fs::create_dir_all(&bin).unwrap();
+        let shell = root.path().join("shell");
+        fs::write(
+            &shell,
+            format!(
+                "#!/bin/bash\nexport PATH=\"{}:/usr/bin:/bin\"\nexec /bin/bash -c \"$2\"\n",
+                bin.display()
+            ),
+        )
+        .unwrap();
+        crate::test_support::make_executable(&shell);
+        let home = root.path().join("home");
+        fs::create_dir_all(home.join(".claude")).unwrap();
+        fs::write(
+            home.join(".claude/.credentials.json"),
+            r#"{"claudeAiOauth":{"accessToken":"own-a","refreshToken":"own-r"}}"#,
+        )
+        .unwrap();
+        fs::write(
+            home.join(".claude.json"),
+            r#"{"oauthAccount":{"emailAddress":"own@example.com","organizationUuid":"org-own"}}"#,
+        )
+        .unwrap();
+        let secrets = Arc::new(MemorySecretStore::default());
+        secrets
+            .write(
+                crate::claude::MANAGED_SERVICE,
+                "acc-b",
+                r#"{"claudeAiOauth":{"accessToken":"b-a","refreshToken":"b-r"},"oauthAccount":{"emailAddress":"b@example.com","organizationUuid":"org-b"}}"#,
+            )
+            .unwrap();
+        let store = AccountStateStore::new(StateStore::in_memory());
+        let now = Utc::now();
+        store.update(|state| {
+            state.claude_code.accounts = vec![ManagedAccountRecord {
+                id: "acc-b".into(),
+                identity: AccountIdentity::new("b@example.com", Some("org-b".into())),
+                organization_name: None,
+                plan: None,
+                created_at: now,
+                last_authenticated_at: now,
+            }];
+        });
+        let paths = AccountPaths::new(home.clone(), root.path().join("support"));
+        let launch = Arc::new(AccountLaunchState::new());
+        let usage_by_token = Arc::new(Mutex::new(HashMap::from([
+            ("own-a".to_owned(), 0.10_f64),
+            ("b-a".to_owned(), 0.07_f64),
+        ])));
+        let fetches = Arc::new(AtomicUsize::new(0));
+        let usage_table = Arc::clone(&usage_by_token);
+        let fetch_count = Arc::clone(&fetches);
+        let controller = AccountsController::with_parts(ControllerParts {
+            store: store.clone(),
+            paths,
+            runner: CommandRunner::new(shell.to_string_lossy()),
+            claude_keychain: None,
+            secrets,
+            launch_state: Arc::clone(&launch),
+            profile: Arc::new(|_: &str| None),
+            usage: Arc::new(move |provider, credential| {
+                if provider != AccountProvider::Claude {
+                    return None;
+                }
+                fetch_count.fetch_add(1, Ordering::SeqCst);
+                let used = *usage_table.lock().unwrap().get(&credential.access_token)?;
+                Some(AccountUsage {
+                    windows: vec![UsageWindow { label: "5h".into(), used_fraction: used, resets_at: None }],
+                    fetched_at: Utc::now(),
+                })
+            }),
+        });
+
+        // With automatic off, launching claude-code does nothing.
+        let _ = launch.adjustments("claude-code");
+        assert_eq!(fetches.load(Ordering::SeqCst), 0);
+        assert_eq!(store.state().claude_code.active_account_id, None);
+
+        // Enabling automatic does not switch until a Claude Code launch happens.
+        controller.select_automatic(AccountListId::CLAUDE_CODE);
+        assert!(controller.wait_until_idle(Duration::from_secs(30)));
+        assert!(store.state().claude_code.automatic);
+        assert_eq!(store.state().claude_code.active_account_id, None);
+
+        // Launching another agent or a background probe does not switch Claude Code.
+        let before = fetches.load(Ordering::SeqCst);
+        let _ = launch.adjustments("codex");
+        let _ = launch.adjustments_for_probe("claude-code");
+        assert_eq!(fetches.load(Ordering::SeqCst), before);
+        assert_eq!(store.state().claude_code.active_account_id, None);
+
+        // Launching claude-code fetches fresh usage and switches from 10% (own) to 7% (acc-b).
+        let _ = launch.adjustments("claude-code");
+        assert_eq!(store.state().claude_code.active_account_id.as_deref(), Some("acc-b"));
+        let config = fs::read_to_string(home.join(".claude.json")).unwrap();
+        assert!(config.contains("b@example.com"), "expected b@example.com in {config}");
+        let claude_list = &controller.snapshot().lists[&AccountListId::CLAUDE_CODE];
+        assert!(claude_list.is_automatic);
+        assert_eq!(claude_list.selected_account_id.as_deref(), Some("acc-b"));
+
+        // Later, acc-b rises to 40% while system-default is still at 10%: next launch switches back.
+        usage_by_token.lock().unwrap().insert("b-a".into(), 0.40);
+        let _ = launch.adjustments("claude-code");
+        assert_eq!(store.state().claude_code.active_account_id, None);
+        let config = fs::read_to_string(home.join(".claude.json")).unwrap();
+        assert!(config.contains("own@example.com"), "expected own@example.com in {config}");
     }
 }

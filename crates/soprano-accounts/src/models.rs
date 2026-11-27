@@ -232,6 +232,9 @@ pub struct AccountList {
     /// The chosen account; nil selects the system default (CLIs) or automatic
     /// balancing (omp).
     pub selected_account_id: Option<String>,
+    /// True when the CLI automatically picks the account with the most
+    /// remaining usage on launch (currently Claude Code).
+    pub is_automatic: bool,
 }
 
 impl AccountList {
@@ -242,6 +245,7 @@ impl AccountList {
             system_default: None,
             accounts: Vec::new(),
             selected_account_id: None,
+            is_automatic: false,
         }
     }
 

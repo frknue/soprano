@@ -200,11 +200,13 @@ impl ClaudeCodeAccountManager {
         let state = self.state();
         list.accounts = state.accounts.iter().map(row).collect();
         list.selected_account_id = state.active_account_id;
+        list.is_automatic = state.automatic;
         list
     }
 
     /// Tokens that are still valid, for usage lookups: the live login (whoever
-    /// is active) and each stored login that is not.
+    /// is active), the saved System default when a managed login is active, and
+    /// each stored managed login that is not active.
     pub fn usage_credentials(&self) -> Vec<UsageCredential> {
         let mut credentials = Vec::new();
         let now = Utc::now();
@@ -215,6 +217,19 @@ impl ClaudeCodeAccountManager {
         {
             let row_id = state.active_account_id.clone().unwrap_or_else(|| SYSTEM_DEFAULT_ROW_ID.into());
             credentials.push(UsageCredential { row_id, identity, access_token: token, account_id: None });
+        }
+        if state.active_account_id.is_some()
+            && let Ok(Some(stored)) = self.read_stored(SYSTEM_DEFAULT_SLOT)
+            && let Some(token) = valid_access_token(stored.oauth.as_ref(), &now)
+            && let Some(identity) = identity(stored.oauth_account.as_ref())
+                .or_else(|| state.system_default.as_ref().map(|record| record.identity.clone()))
+        {
+            credentials.push(UsageCredential {
+                row_id: SYSTEM_DEFAULT_ROW_ID.into(),
+                identity,
+                access_token: token,
+                account_id: None,
+            });
         }
         for record in &state.accounts {
             if state.active_account_id.as_deref() == Some(record.id.as_str()) {
@@ -259,8 +274,26 @@ impl ClaudeCodeAccountManager {
         self.commit_reauthentication(account_id, login)
     }
 
-    /// Signs Claude Code in with `account_id`, or puts its own login back (nil).
+    /// Signs Claude Code in with `account_id`, or puts its own login back (nil),
+    /// and disables automatic launch-time selection.
     pub fn select(&self, account_id: Option<&str>) -> AccountResult<()> {
+        let _serial = self.serial();
+        self.select_now(account_id)?;
+        self.update(|state| state.automatic = false);
+        Ok(())
+    }
+
+    /// Enables or disables automatic launch-time selection without changing the
+    /// currently signed-in account.
+    pub fn set_automatic(&self, enabled: bool) -> AccountResult<()> {
+        let _serial = self.serial();
+        self.update(|state| state.automatic = enabled);
+        Ok(())
+    }
+
+    /// Switches Claude Code to `account_id` on behalf of automatic mode,
+    /// keeping `automatic` enabled.
+    pub fn select_automatic_target(&self, account_id: Option<&str>) -> AccountResult<()> {
         let _serial = self.serial();
         self.select_now(account_id)
     }
@@ -1105,5 +1138,40 @@ mod tests {
         assert_eq!(valid_access_token(Some(&oauth), &now), None);
         let fresh = json_object(r#"{"accessToken":"a","expiresAt":1001000}"#).unwrap();
         assert_eq!(valid_access_token(Some(&fresh), &now).as_deref(), Some("a"));
+    }
+
+    #[test]
+    fn usage_credentials_include_the_saved_system_default_while_a_managed_account_is_active() {
+        let fixture = make_fixture();
+        seed(&fixture);
+        fixture.manager.select(Some("x")).unwrap();
+
+        let credentials = fixture.manager.usage_credentials();
+        let rows: Vec<(&str, &str)> =
+            credentials.iter().map(|c| (c.row_id.as_str(), c.access_token.as_str())).collect();
+        assert!(rows.contains(&("x", "x-a")), "missing active managed account: {rows:?}");
+        assert!(rows.contains(&(SYSTEM_DEFAULT_ROW_ID, "own-a")), "missing saved system default: {rows:?}");
+    }
+
+    #[test]
+    fn automatic_mode_survives_automatic_switches_and_clears_on_manual_selection() {
+        let fixture = make_fixture();
+        seed(&fixture);
+
+        fixture.manager.set_automatic(true).unwrap();
+        assert!(fixture.manager.list().is_automatic);
+        assert_eq!(fixture.manager.list().selected_account_id, None);
+
+        fixture.manager.select_automatic_target(Some("x")).unwrap();
+        let list = fixture.manager.list();
+        assert!(list.is_automatic);
+        assert_eq!(list.selected_account_id.as_deref(), Some("x"));
+        assert_eq!(live_email(&fixture).as_deref(), Some("x@team.dev"));
+
+        // Pinning the already-live account clears automatic mode.
+        fixture.manager.select(Some("x")).unwrap();
+        let list = fixture.manager.list();
+        assert!(!list.is_automatic);
+        assert_eq!(list.selected_account_id.as_deref(), Some("x"));
     }
 }

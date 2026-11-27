@@ -19,6 +19,7 @@ pub trait AccountsSource {
     fn reauthenticate(&self, account_id: &str, list: AccountListId);
     fn cancel_login(&self);
     fn select(&self, account_id: Option<&str>, list: AccountListId);
+    fn select_automatic(&self, list: AccountListId);
     fn remove(&self, account_id: &str, list: AccountListId);
     fn dismiss_error(&self, list: AccountListId);
 }
@@ -48,6 +49,9 @@ impl AccountsSource for AccountsController {
     fn select(&self, account_id: Option<&str>, list: AccountListId) {
         AccountsController::select(self, account_id, list);
     }
+    fn select_automatic(&self, list: AccountListId) {
+        AccountsController::select_automatic(self, list);
+    }
     fn remove(&self, account_id: &str, list: AccountListId) {
         AccountsController::remove(self, account_id, list);
     }
@@ -74,6 +78,8 @@ pub enum PageAction {
         list: AccountListId,
         account_id: Option<String>,
     },
+    /// Enable automatic usage-based selection (Claude Code: on launch).
+    SelectAutomatic(AccountListId),
     /// Asks first (`perform` returns the `Confirmation`); its confirm button
     /// performs `Remove`.
     ConfirmRemove {
@@ -113,6 +119,7 @@ impl PageAction {
             Self::AddAccount(list) => source.add_account(*list),
             Self::Reauthenticate { list, account_id } => source.reauthenticate(account_id, *list),
             Self::Select { list, account_id } => source.select(account_id.as_deref(), *list),
+            Self::SelectAutomatic(list) => source.select_automatic(*list),
             Self::ConfirmRemove { list, account_id, email } => {
                 return Some(Confirmation {
                     title: format!("Remove {email}?"),
@@ -285,7 +292,7 @@ pub fn list_note(tool: AccountTool) -> &'static str {
             "omp uses every account and fails over when one runs out. New omp panes try the preferred account first."
         }
         AccountTool::ClaudeCode => {
-            "Choosing an account signs Claude Code in with it on this Mac; running claude sessions switch too. System default is the login Claude Code had before."
+            "Automatic picks the account with the most remaining usage when you launch Claude Code. Choosing an account signs Claude Code in with it; running claude sessions switch too. System default is the login Claude Code had before."
         }
         AccountTool::CodexCli => {
             "New codex panes use the chosen account; running panes keep theirs. History, config and skills stay shared."
@@ -323,7 +330,11 @@ fn section(id: AccountListId, snapshot: &AccountsSnapshot, now: &Timestamp) -> A
             SectionBody::Unavailable(list.unavailable_reason.clone().unwrap_or_default())
         }
         Some(list) => {
-            let mut rows = vec![default_row(list, now)];
+            let mut rows = Vec::new();
+            if list.id.tool == AccountTool::ClaudeCode {
+                rows.push(automatic_row(list));
+            }
+            rows.push(default_row(list, now));
             rows.extend(list.accounts.iter().map(|account| account_row(account, list, snapshot, now)));
             SectionBody::Rows(rows)
         }
@@ -343,10 +354,29 @@ fn section(id: AccountListId, snapshot: &AccountsSnapshot, now: &Timestamp) -> A
     }
 }
 
+/// "Automatic" for Claude Code: checks usage on launch and switches to the
+/// account with the most remaining headroom.
+fn automatic_row(list: &AccountList) -> EntryRow {
+    let is_selected = list.is_automatic;
+    let mut buttons = Vec::new();
+    if !is_selected {
+        buttons.push(Button::new("Automatic", PageAction::SelectAutomatic(list.id)));
+    }
+    EntryRow {
+        title: "Automatic".to_owned(),
+        is_selected,
+        badge: is_selected.then_some("Active"),
+        detail: "Use the account with the most remaining usage on launch".to_owned(),
+        problem: None,
+        buttons,
+    }
+}
+
 /// "Automatic" for omp, "System default" for the CLIs: the choice that
 /// leaves the tool to its own login.
 fn default_row(list: &AccountList, now: &Timestamp) -> EntryRow {
-    let is_selected = list.selected_account_id.is_none();
+    let is_live = list.selected_account_id.is_none();
+    let is_selected = is_live && !list.is_automatic;
     let is_omp = list.id.tool == AccountTool::Omp;
     let (title, detail, problem) = if is_omp {
         ("Automatic", "Balance by usage".to_owned(), None)
@@ -368,14 +398,14 @@ fn default_row(list: &AccountList, now: &Timestamp) -> EntryRow {
             PageAction::Select { list: list.id, account_id: None },
         ));
     }
-    EntryRow {
-        title: title.to_owned(),
-        is_selected,
-        badge: is_selected.then_some("Active"),
-        detail,
-        problem,
-        buttons,
-    }
+    let badge = if is_selected {
+        Some("Active")
+    } else if is_live && list.is_automatic {
+        Some("In use")
+    } else {
+        None
+    };
+    EntryRow { title: title.to_owned(), is_selected, badge, detail, problem, buttons }
 }
 
 fn account_row(
@@ -385,7 +415,8 @@ fn account_row(
     now: &Timestamp,
 ) -> EntryRow {
     let is_omp = list.id.tool == AccountTool::Omp;
-    let is_selected = list.selected_account_id.as_deref() == Some(account.id.as_str());
+    let is_live = list.selected_account_id.as_deref() == Some(account.id.as_str());
+    let is_selected = is_live && !list.is_automatic;
     let mut buttons = Vec::new();
     if !is_selected {
         buttons.push(Button::new(
@@ -412,10 +443,17 @@ fn account_row(
         )
         .variant(ButtonVariant::DestructiveOutline),
     );
+    let badge = if is_selected {
+        Some(if is_omp { "Preferred" } else { "Active" })
+    } else if is_live && list.is_automatic {
+        Some("In use")
+    } else {
+        None
+    };
     EntryRow {
         title: account.identity.email.clone(),
         is_selected,
-        badge: is_selected.then_some(if is_omp { "Preferred" } else { "Active" }),
+        badge,
         detail: detail_parts(account, now).join("  ·  "),
         problem: account.problem.clone(),
         buttons,
@@ -653,9 +691,9 @@ impl UsageCard {
     }
 }
 
-/// "omp · automatic" until a login is preferred, then the tool's name.
+/// "omp · automatic" / "Claude Code · automatic" when automatic, else the tool's name.
 pub fn caption(list: &AccountList) -> String {
-    if list.id.tool == AccountTool::Omp && list.selected_account_id.is_none() {
+    if (list.id.tool == AccountTool::Omp && list.selected_account_id.is_none()) || list.is_automatic {
         format!("{} · automatic", list.id.tool.display_name())
     } else {
         list.id.tool.display_name().to_owned()
@@ -757,6 +795,9 @@ mod tests {
                 account_id.unwrap_or("default"),
                 Self::list_name(list)
             ));
+        }
+        fn select_automatic(&self, list: AccountListId) {
+            self.calls.borrow_mut().push(format!("select automatic in {}", Self::list_name(list)));
         }
         fn remove(&self, account_id: &str, _: AccountListId) {
             self.calls.borrow_mut().push(format!("remove {account_id}"));
@@ -1029,5 +1070,43 @@ mod tests {
             UsageCard::build(&AccountsSnapshot::default(), &now()).empty_text,
             Some("No accounts yet.")
         );
+    }
+
+    #[test]
+    fn claude_code_offers_automatic_mode_and_marks_the_live_login_in_use() {
+        let accounts = FakeAccounts::new(demo_snapshot());
+        let page = AccountsPage::build(&accounts.snapshot(), &now());
+        let claude_section =
+            page.sections.iter().find(|section| section.list == AccountListId::CLAUDE_CODE).unwrap();
+        let SectionBody::Rows(claude_rows) = &claude_section.body else { panic!("no rows") };
+        assert_eq!(claude_rows[0].title, "Automatic");
+        assert!(!claude_rows[0].is_selected);
+        let automatic_button = claude_rows[0].buttons.iter().find(|b| b.title == "Automatic").unwrap();
+        automatic_button.action.perform(&accounts);
+        assert_eq!(accounts.last_call().as_deref(), Some("select automatic in claude/claudeCode"));
+
+        // When Automatic is active, Automatic is selected, the live login shows "In use" with a Use button,
+        // and the usage card caption reads "Claude Code · automatic".
+        let mut auto_snapshot = demo_snapshot();
+        let claude = auto_snapshot.lists.get_mut(&AccountListId::CLAUDE_CODE).unwrap();
+        claude.is_automatic = true;
+        claude.selected_account_id = Some("grace@example.com".into());
+
+        let page = AccountsPage::build(&auto_snapshot, &now());
+        let claude_section =
+            page.sections.iter().find(|section| section.list == AccountListId::CLAUDE_CODE).unwrap();
+        let SectionBody::Rows(claude_rows) = &claude_section.body else { panic!("no rows") };
+        assert!(claude_rows[0].is_selected);
+        assert_eq!(claude_rows[0].badge, Some("Active"));
+        assert!(claude_rows[0].buttons.is_empty());
+
+        let grace = claude_rows.iter().find(|row| row.title == "grace@example.com").unwrap();
+        assert!(!grace.is_selected);
+        assert_eq!(grace.badge, Some("In use"));
+        assert!(grace.buttons.iter().any(|button| button.title == "Use"));
+
+        let card = UsageCard::build(&auto_snapshot, &now());
+        assert_eq!(card.providers[0].lists[1].caption, "Claude Code · automatic");
+        assert!(card.providers[0].lists[1].rows[1].is_selected);
     }
 }

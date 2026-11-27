@@ -10,6 +10,10 @@ the single source of truth for the version shown in **Settings ▸ About**.
 ## [Unreleased]
 
 ### Added
+- **Automatic Claude Code account selection on launch**: choose **Automatic** under
+  **Settings ▸ Accounts ▸ Claude · Claude Code** to check usage across your Claude Code
+  subscriptions when launching a Claude Code pane (CLI or Chat UI) and automatically switch
+  to the account with the most remaining headroom (lowest tightest-window usage).
 - **Vim mode in the built-in file editor** (on by default; toggle in **Settings ▸ General ▸
   Editor** or `"editor": { "vimMode": false }` in `settings.json`): Normal, Insert, Visual,
   and Visual Line modes with a block cursor, toolbar mode badge, counts, motions

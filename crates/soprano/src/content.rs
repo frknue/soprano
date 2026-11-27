@@ -853,7 +853,7 @@ impl ContentHost {
         let agent = tab.agent.as_ref()?;
         let profile = AgentCatalog::shared().profile(&agent.profile_id)?;
         let cwd = agent.conversation.as_ref().and_then(|c| c.cwd.clone()).or_else(|| tab.cwd.clone());
-        let chat_launch = self.chat_launch(&profile, cwd.as_deref())?;
+        let chat_launch = self.chat_launch(&profile, cwd.as_deref(), true)?;
         let session = soprano_chat::session::AgentChatSession::new(chat_launch);
         let agent_name = profile.name.clone();
         let attachments = soprano_platform::paths::data_dir(&soprano_platform::AppIdentity::current())
@@ -881,8 +881,13 @@ impl ContentHost {
         &self,
         profile: &soprano_types::AgentProfile,
         cwd: Option<&str>,
+        prepare_accounts: bool,
     ) -> Option<soprano_chat::session::AgentChatLaunch> {
-        let adjustments = AccountLaunchState::shared().adjustments(&profile.id);
+        let adjustments = if prepare_accounts {
+            AccountLaunchState::shared().adjustments(&profile.id)
+        } else {
+            AccountLaunchState::shared().adjustments_for_probe(&profile.id)
+        };
         let accounts =
             AccountAdjustments { environment: adjustments.environment, arguments: adjustments.arguments };
         let ctx = &self.launch_context;
@@ -922,7 +927,7 @@ impl ContentHost {
         ));
         let launch = AgentCatalog::shared().profile(profile_id).and_then(|mut profile| {
             profile.args.extend(soprano_launch::ChatLaunch::throwaway_arguments_for(profile_id, &folder));
-            self.chat_launch(&profile, Some(&folder.to_string_lossy()))
+            self.chat_launch(&profile, Some(&folder.to_string_lossy()), false)
         });
         let Some(launch) = launch else { return Task::ready(Vec::new()) };
         cx.background_executor().spawn(async move {

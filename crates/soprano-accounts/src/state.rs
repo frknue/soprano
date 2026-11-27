@@ -106,6 +106,10 @@ pub struct ManagedAccountsState {
     /// from it, so the System default row can still name it.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub system_default: Option<ManagedAccountRecord>,
+    /// True when Soprano checks usage on launch and switches to the account
+    /// with the most remaining headroom (Claude Code).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub automatic: bool,
 }
 
 impl ManagedAccountsState {
@@ -235,5 +239,21 @@ mod tests {
         let accounts = AccountStateStore::new(store.clone());
         accounts.update(|_| {});
         assert!(!store.contains("soprano-accounts"));
+    }
+
+    #[test]
+    fn automatic_mode_is_omitted_when_false_and_persists_when_enabled() {
+        let store = StateStore::in_memory();
+        let accounts = AccountStateStore::new(store.clone());
+        accounts.update(|state| state.claude_code.active_account_id = Some("a".into()));
+        let saved = store.get_raw("soprano-accounts").unwrap();
+        assert!(saved["claudeCode"].get("automatic").is_none());
+
+        accounts.update(|state| state.claude_code.automatic = true);
+        let saved = store.get_raw("soprano-accounts").unwrap();
+        assert_eq!(saved["claudeCode"]["automatic"], true);
+
+        let reloaded = AccountStateStore::new(store);
+        assert!(reloaded.state().claude_code.automatic);
     }
 }
