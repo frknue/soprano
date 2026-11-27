@@ -13,7 +13,8 @@ use soprano_chat::{AgentChatPlanEntry, ChatInteraction, ChatPhase, PlanEntryStat
 use soprano_ui::button::{ButtonSize, IconButtonSize};
 use soprano_ui::fonts::{MONO_FONT_FAMILY, UI_FONT_FAMILY};
 use soprano_ui::{
-    ActiveSopranoTheme, Button, IconButton, IconName, Keycaps, SopranoTheme, file_type_icon, icon,
+    ActiveSopranoTheme, Button, Icon, IconButton, IconName, Keycaps, SopranoTheme, agent_icon_stem,
+    file_type_icon, icon,
 };
 
 use crate::attachments::Attachment;
@@ -51,20 +52,26 @@ fn remove_attachment_button(
         .child(icon(IconName::X).size(10.0 * t.chat_zoom_factor()).color(t.foreground))
 }
 
-/// The agent's mark in the model chip and picker: omp (oh-my-pi) has no vector mark, so a heavy
-/// "π" in the UI font.
-pub(crate) fn agent_glyph(size: f32, color: Hsla, t: &SopranoTheme) -> impl IntoElement {
-    div()
-        .w(t.cz(size))
-        .h(t.cz(size))
-        .flex()
-        .items_center()
-        .justify_center()
-        .font_family(UI_FONT_FAMILY)
-        .font_weight(FontWeight::EXTRA_BOLD)
-        .text_size(t.cz(size * 1.05))
-        .text_color(color)
-        .child("π")
+/// The agent's mark in the model picker: its program icon (Claude Code, Codex, …); omp
+/// (oh-my-pi) gets a heavy "π" in the UI font, an agent without an icon the bot glyph.
+pub(crate) fn agent_glyph(profile_id: &str, size: f32, color: Hsla, t: &SopranoTheme) -> AnyElement {
+    let side = size * t.chat_zoom_factor();
+    match agent_icon_stem(profile_id) {
+        _ if profile_id == "omp" => div()
+            .w(t.cz(size))
+            .h(t.cz(size))
+            .flex()
+            .items_center()
+            .justify_center()
+            .font_family(UI_FONT_FAMILY)
+            .font_weight(FontWeight::EXTRA_BOLD)
+            .text_size(t.cz(size * 1.05))
+            .text_color(color)
+            .child("π")
+            .into_any_element(),
+        Some(stem) => Icon::program(stem).size(side).color(color).into_any_element(),
+        None => icon(IconName::Bot).size(side).color(color).into_any_element(),
+    }
 }
 
 impl ComposerView {

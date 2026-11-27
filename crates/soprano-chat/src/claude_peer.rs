@@ -27,13 +27,47 @@ use crate::rpc::{
     child_exit_code, configure_child, kill_child, terminate_child,
 };
 
-/// Default model choices surfaced in Claude Code's composer chip.
-const CLAUDE_MODELS: &[(&str, &str)] = &[
-    ("default", "Default"),
-    ("sonnet", "Claude Sonnet"),
-    ("opus", "Claude Opus"),
-    ("haiku", "Claude Haiku"),
-];
+/// Claude Code's model aliases, shown until its `initialize` reply lists the real models.
+const CLAUDE_MODELS: &[(&str, &str)] =
+    &[("default", "Default"), ("opus", "Opus"), ("fable", "Fable"), ("sonnet", "Sonnet"), ("haiku", "Haiku")];
+
+/// A model Claude Code offers, as its `initialize` reply lists it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ClaudeModel {
+    /// What `--model` and `set_model` take: an alias (`opus`) or a model id.
+    pub value: String,
+    /// Claude Code's own label ("Opus 5.5", "Default (recommended)").
+    pub name: String,
+    pub description: Option<String>,
+    /// The model id the value runs (`opus` → `claude-opus-5-5`), when reported.
+    pub resolved: Option<String>,
+}
+
+impl ClaudeModel {
+    fn alias(value: &str, name: &str) -> Self {
+        Self { value: value.into(), name: name.into(), description: None, resolved: None }
+    }
+
+    fn runs(&self, model: &str) -> bool {
+        self.value == model || self.resolved.as_deref() == Some(model)
+    }
+}
+
+/// The `models` of Claude Code's `initialize` control response.
+fn parse_claude_models(models: &[Value]) -> Vec<ClaudeModel> {
+    models
+        .iter()
+        .filter_map(|model| {
+            let value = model.get("value").and_then(Value::non_empty_string)?;
+            Some(ClaudeModel {
+                value: value.to_owned(),
+                name: model.get("displayName").and_then(Value::non_empty_string).unwrap_or(value).to_owned(),
+                description: model.get("description").and_then(Value::non_empty_string).map(str::to_owned),
+                resolved: model.get("resolvedModel").and_then(Value::non_empty_string).map(str::to_owned),
+            })
+        })
+        .collect()
+}
 
 /// A Claude Code `control_request` waiting for the user's decision in Chat UI.
 #[derive(Clone, Debug)]
@@ -55,7 +89,7 @@ pub struct ClaudeStreamTranslator {
     pub session_id: String,
     pub pending_prompt_acp_id: Option<u64>,
     pub current_model: String,
-    pub available_models: Vec<(String, String)>,
+    pub available_models: Vec<ClaudeModel>,
     /// Content block indices currently being streamed via `stream_event`.
     streamed_text_this_message: bool,
     streamed_thinking_this_message: bool,
@@ -83,7 +117,10 @@ impl ClaudeStreamTranslator {
             session_id: session_id.into(),
             pending_prompt_acp_id: None,
             current_model: "default".into(),
-            available_models: CLAUDE_MODELS.iter().map(|(id, name)| ((*id).into(), (*name).into())).collect(),
+            available_models: CLAUDE_MODELS
+                .iter()
+                .map(|(value, name)| ClaudeModel::alias(value, name))
+                .collect(),
             streamed_text_this_message: false,
             streamed_thinking_this_message: false,
             active_message_id: 0,
@@ -98,9 +135,18 @@ impl ClaudeStreamTranslator {
     }
 
     pub fn config_options(&self) -> Value {
-        let mut options: Vec<Value> =
-            self.available_models.iter().map(|(value, name)| json!({"value": value, "name": name})).collect();
-        if !self.available_models.iter().any(|(v, _)| v == &self.current_model) {
+        let mut options: Vec<Value> = self
+            .available_models
+            .iter()
+            .map(|model| {
+                let mut entry = json!({"value": model.value, "name": model.name});
+                if let Some(description) = &model.description {
+                    entry["description"] = Value::String(description.clone());
+                }
+                entry
+            })
+            .collect();
+        if !self.available_models.iter().any(|model| model.value == self.current_model) {
             options.insert(0, json!({"value": self.current_model, "name": self.current_model}));
         }
         json!([{
@@ -111,6 +157,34 @@ impl ClaudeStreamTranslator {
             "currentValue": self.current_model,
             "options": options,
         }])
+    }
+
+    /// Follows the model Claude Code reports running (`claude-opus-5-5`): the picked value
+    /// stays when it runs that model, else the listed value that does, else the raw id.
+    fn adopt_running_model(&mut self, model: &str) {
+        if self.available_models.iter().any(|m| m.value == self.current_model && m.runs(model)) {
+            return;
+        }
+        let value = self
+            .available_models
+            .iter()
+            .find(|m| m.value == model)
+            .or_else(|| self.available_models.iter().find(|m| m.runs(model)))
+            .map_or(model, |m| m.value.as_str())
+            .to_owned();
+        if self.current_model != value {
+            self.current_model = value;
+            self.context_window = None;
+        }
+    }
+
+    /// The model id the current value runs, for matching `result.modelUsage` keys.
+    fn running_model(&self) -> &str {
+        self.available_models
+            .iter()
+            .find(|m| m.value == self.current_model)
+            .and_then(|m| m.resolved.as_deref())
+            .unwrap_or(&self.current_model)
     }
 
     /// Translates one parsed NDJSON object from Claude Code's stdout into zero or more ACP
@@ -125,10 +199,7 @@ impl ClaudeStreamTranslator {
                 }
                 if msg.get("subtype").and_then(Value::as_str) == Some("init") {
                     if let Some(model) = msg.get("model").and_then(Value::non_empty_string) {
-                        if self.current_model != model {
-                            self.current_model = model.to_owned();
-                            self.context_window = None;
-                        }
+                        self.adopt_running_model(model);
                         out.push(self.session_update(json!({
                             "sessionUpdate": "config_option_update",
                             "configOptions": self.config_options(),
@@ -322,7 +393,7 @@ impl ClaudeStreamTranslator {
                 }
             }
             "result" => {
-                if let Some(window) = extract_claude_context_window(msg, &self.current_model) {
+                if let Some(window) = extract_claude_context_window(msg, self.running_model()) {
                     self.context_window = Some(window);
                 }
                 let used = self.last_message_usage.take().or_else(|| {
@@ -414,6 +485,31 @@ impl ClaudeStreamTranslator {
                         });
                     }
                 }
+            }
+            "control_response" => {
+                // The `initialize` reply lists the account's models with Claude Code's labels.
+                let Some(models) = msg
+                    .get("response")
+                    .filter(|r| r.get("subtype").and_then(Value::as_str) == Some("success"))
+                    .and_then(|r| r.get("response"))
+                    .and_then(|r| r.get("models"))
+                    .and_then(Value::as_array)
+                else {
+                    return out;
+                };
+                let models = parse_claude_models(models);
+                if models.is_empty() {
+                    return out;
+                }
+                self.available_models = models;
+                if !self.available_models.iter().any(|m| m.value == self.current_model) {
+                    let current = self.current_model.clone();
+                    self.adopt_running_model(&current);
+                }
+                out.push(self.session_update(json!({
+                    "sessionUpdate": "config_option_update",
+                    "configOptions": self.config_options(),
+                })));
             }
             _ => {}
         }
@@ -581,6 +677,13 @@ impl ClaudeStreamJsonPeer {
             sink.send(PeerEvent::Exit { status, stderr: tail.text() });
         });
         self.threads.push(waiter);
+        // Asks for the account's models; the reply replaces the alias placeholders.
+        self.next_control_out_id += 1;
+        self.child.write_json(&json!({
+            "type": "control_request",
+            "request_id": format!("soprano-initialize-{}", self.next_control_out_id),
+            "request": { "subtype": "initialize" },
+        }));
         Ok(())
     }
 }
@@ -1355,6 +1458,49 @@ mod tests {
             }
         }
         assert_eq!(usages, vec![(180_000, 1_000_000)]);
+    }
+
+    #[test]
+    fn initialize_reply_lists_claude_codes_models_and_init_keeps_the_picked_alias() {
+        let mut tr = ClaudeStreamTranslator::new("sess-models");
+        let models = |events: Vec<PeerEvent>| -> (String, Vec<(String, String)>) {
+            let Some(PeerEvent::Notification { params, .. }) = events.into_iter().last() else {
+                panic!("expected a config update")
+            };
+            let option = &params["update"]["configOptions"][0];
+            let values = option["options"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .map(|o| (o["value"].as_str().unwrap_or("").into(), o["name"].as_str().unwrap_or("").into()))
+                .collect();
+            (option["currentValue"].as_str().unwrap_or_default().to_owned(), values)
+        };
+        let reply = json!({"type": "control_response", "response": {"subtype": "success", "request_id": "soprano-initialize-1", "response": {"models": [
+            {"value": "default", "resolvedModel": "claude-opus-5-5", "displayName": "Default (recommended)", "description": "Opus 5.5 · Best for everyday, complex tasks"},
+            {"value": "opus", "resolvedModel": "claude-opus-5-5", "displayName": "Opus 5.5"},
+            {"value": "fable", "resolvedModel": "claude-fable-5-2", "displayName": "Fable 5.2"},
+            {"value": "sonnet", "resolvedModel": "claude-sonnet-5-5", "displayName": "Sonnet 5.5"}
+        ]}}});
+        let (_, listed) = models(tr.handle_message(&reply));
+        assert_eq!(
+            listed.iter().map(|(value, name)| (value.as_str(), name.as_str())).collect::<Vec<_>>(),
+            [
+                ("default", "Default (recommended)"),
+                ("opus", "Opus 5.5"),
+                ("fable", "Fable 5.2"),
+                ("sonnet", "Sonnet 5.5")
+            ]
+        );
+
+        let init = json!({"type": "system", "subtype": "init", "session_id": "sess-models", "model": "claude-opus-5-5"});
+        assert_eq!(models(tr.handle_message(&init)).0, "default");
+
+        tr.current_model = "sonnet".into();
+        let fable = json!({"type": "system", "subtype": "init", "session_id": "sess-models", "model": "claude-fable-5-2"});
+        let (current, listed) = models(tr.handle_message(&fable));
+        assert_eq!(current, "fable");
+        assert_eq!(listed.len(), 4, "a resolved model id adds no raw entry");
     }
 
     #[test]

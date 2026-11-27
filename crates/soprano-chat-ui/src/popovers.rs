@@ -328,6 +328,7 @@ impl ComposerView {
         let scroll = popover.scroll.clone();
         let query = search.read(cx).value().to_string();
         let (shown, hidden) = shown_models(&option, &query);
+        let profile_id = self.session.borrow().launch.profile_id.clone();
         let rows: Vec<AnyElement> =
             shown
                 .iter()
@@ -380,7 +381,7 @@ impl ComposerView {
                             .flex()
                             .items_center()
                             .justify_center()
-                            .child(agent_glyph(20.0, t.foreground, &t)),
+                            .child(agent_glyph(&profile_id, 20.0, t.foreground, &t)),
                     )
                     .child(
                         div()

@@ -385,6 +385,9 @@ the single source of truth for the version shown in **Settings ▸ About**.
   actions. Workspaces saved with depth layers reopen with each layer as its own tab.
 
 ### Fixed
+- **Claude Code model picker in Chat UI**: lists the models your Claude Code reports, with its
+  own names (Opus 5.5, Fable 5.2, Sonnet 5.5, …) instead of four generic aliases, keeps the
+  picked alias after the first turn, and shows the Claude mark instead of omp's π.
 - **Claude Code context meter in Chat UI**: shows the latest top-level API call's context
   occupancy against the active model's window instead of the cumulative multi-step turn total
   from `result.usage` (which could exceed 100 % on multi-tool turns).
