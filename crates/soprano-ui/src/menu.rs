@@ -11,7 +11,7 @@ use gpui::{
 };
 
 use crate::fonts::{self, size};
-use crate::icons::{IconName, icon};
+use crate::icons::{Icon, IconName, icon};
 use crate::motion::fade_in;
 use crate::theme::ActiveSopranoTheme;
 
@@ -22,7 +22,7 @@ pub type MenuHandler = Rc<dyn Fn(&mut Window, &mut App)>;
 pub enum MenuItem {
     Action {
         label: SharedString,
-        icon: Option<IconName>,
+        icon: Option<Icon>,
         shortcut: Option<SharedString>,
         disabled: bool,
         checked: bool,
@@ -30,7 +30,7 @@ pub enum MenuItem {
     },
     Submenu {
         label: SharedString,
-        icon: Option<IconName>,
+        icon: Option<Icon>,
         items: Vec<MenuItem>,
     },
     Separator,
@@ -63,9 +63,11 @@ impl MenuItem {
         Self::Header(label.into())
     }
 
-    pub fn icon(mut self, name: IconName) -> Self {
+    /// The row's glyph: an [`IconName`], or any [`Icon`] (an agent's program icon). Drawn at
+    /// 14 px in `muted` like every other row, whatever the icon's own size and color.
+    pub fn icon(mut self, glyph: impl Into<Icon>) -> Self {
         match &mut self {
-            Self::Action { icon, .. } | Self::Submenu { icon, .. } => *icon = Some(name),
+            Self::Action { icon, .. } | Self::Submenu { icon, .. } => *icon = Some(glyph.into()),
             Self::Separator | Self::Header(_) => {}
         }
         self
@@ -331,7 +333,7 @@ impl ContextMenu {
                         .text_color(text)
                         .when(selected == Some(index), |row| row.bg(theme.selected))
                         .when(!*disabled, |row| row.cursor_pointer().hover(move |s| s.bg(hover)))
-                        .when_some(*glyph, |row, name| row.child(icon(name).size(14.).color(theme.muted)))
+                        .when_some(glyph.clone(), |row, glyph| row.child(glyph.size(14.).color(theme.muted)))
                         .child(div().flex_1().min_w_0().truncate().child(label.clone()))
                         .when_some(shortcut.clone(), |row, shortcut| {
                             row.child(div().text_size(z(size::SMALL)).text_color(theme.dim).child(shortcut))
@@ -368,7 +370,7 @@ impl ContextMenu {
                         .when(selected == Some(index) || open, |row| row.bg(theme.selected))
                         .cursor_pointer()
                         .hover(move |s| s.bg(hover))
-                        .when_some(*glyph, |row, name| row.child(icon(name).size(14.).color(theme.muted)))
+                        .when_some(glyph.clone(), |row, glyph| row.child(glyph.size(14.).color(theme.muted)))
                         .child(div().flex_1().min_w_0().truncate().child(label.clone()))
                         .child(icon(IconName::ChevronRight).size(12.).color(theme.dim))
                         .on_hover(cx.listener(move |this, hovered: &bool, _, cx| {

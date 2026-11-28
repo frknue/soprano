@@ -278,6 +278,12 @@ impl Icon {
     }
 }
 
+impl From<IconName> for Icon {
+    fn from(name: IconName) -> Self {
+        Self::new(name)
+    }
+}
+
 impl RenderOnce for Icon {
     fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
         let theme = cx.soprano_theme();

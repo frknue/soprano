@@ -237,6 +237,9 @@ the single source of truth for the version shown in **Settings ▸ About**.
 - **Find Window** (`find-window`) moved from `⌘F` to `⇧⌘F`, so `⌘F` always reaches the
   focused terminal, browser, editor or chat; **Find in Chat** (`find-in-chat`) moved from
   `⇧⌘F` to `⌃A` → `F`. Rebind either under **Settings ▸ Keyboard Shortcuts**.
+- **Agent icons in the New Tab menu**: the `+` menu of a pane header and of the tab row shows
+  each agent with its own icon (Codex, Claude Code, Open Code, omp, Antigravity) instead of
+  one generic chip.
 - **New Window directory picker**: **New Window…** (`⌘N`, the window tab row's `+` button,
   the sidebar `+` menu, and the command palette) now asks for a directory with a searchable
   picker listing the current directory, open workspace folders, configured

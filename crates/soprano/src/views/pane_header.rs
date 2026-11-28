@@ -337,7 +337,9 @@ pub struct AddTabEntry {
     /// `terminal`, `browser`, `agent-<profile>`, `chat-<profile>`, `markdown`.
     pub id: String,
     pub label: String,
-    pub icon: IconName,
+    /// What the header of the tab it opens shows ([`header_icon`]): an agent's program icon,
+    /// the chat bubble for a chat.
+    pub icon: HeaderIcon,
     pub action: AddTabAction,
 }
 
@@ -345,17 +347,18 @@ pub struct AddTabEntry {
 /// chat-capable agent as a chat, and a Markdown file; `None` is a separator.
 pub fn add_tab_menu_entries() -> Vec<Option<AddTabEntry>> {
     let entry = |id: String, label: String, icon, action| Some(AddTabEntry { id, label, icon, action });
+    let symbol = HeaderIcon::Symbol;
     let profiles = AgentCatalog::shared().all();
     let mut entries = vec![
-        entry("terminal".into(), "Terminal".into(), IconName::Terminal, AddTabAction::Terminal),
-        entry("browser".into(), "Browser".into(), IconName::Globe, AddTabAction::Browser),
+        entry("terminal".into(), "Terminal".into(), symbol(IconName::Terminal), AddTabAction::Terminal),
+        entry("browser".into(), "Browser".into(), symbol(IconName::Globe), AddTabAction::Browser),
         None,
     ];
     entries.extend(profiles.iter().filter(|profile| profile.id != "terminal").map(|profile| {
         entry(
             format!("agent-{}", profile.id),
             profile.name.clone(),
-            IconName::SUBAGENT,
+            HeaderIcon::Program(agent_icon_stem(&profile.id)),
             AddTabAction::Agent(profile.id.clone()),
         )
     }));
@@ -363,7 +366,7 @@ pub fn add_tab_menu_entries() -> Vec<Option<AddTabEntry>> {
         entry(
             format!("chat-{}", profile.id),
             format!("{} Chat", profile.name),
-            IconName::MessageSquare,
+            symbol(IconName::MessageSquare),
             AddTabAction::Chat(profile.id.clone()),
         )
     }));
@@ -371,7 +374,7 @@ pub fn add_tab_menu_entries() -> Vec<Option<AddTabEntry>> {
     entries.push(entry(
         "markdown".into(),
         "Markdown File…".into(),
-        IconName::FILE_TAB,
+        symbol(IconName::FILE_TAB),
         AddTabAction::Markdown,
     ));
     entries
@@ -792,22 +795,24 @@ pub fn add_tab_menu(place: NewTabPlace, workspace: &WorkspaceHandle, shell: &Ent
             let Some(entry) = entry else { return MenuItem::separator() };
             let (place, workspace, shell) = (place.clone(), workspace.clone(), shell.clone());
             let action = entry.action;
-            MenuItem::new(entry.label).icon(entry.icon).on_select(move |_, cx| match (&action, &place) {
-                (AddTabAction::Markdown, NewTabPlace::InPane(pane_id)) => {
-                    shell::dispatch(
-                        &shell,
-                        Command::OpenMarkdown(MarkdownTarget::PaneTab(pane_id.clone())),
-                        cx,
-                    );
-                }
-                (AddTabAction::Markdown, NewTabPlace::NewLayoutTab) => {
-                    shell::dispatch(&shell, Command::OpenMarkdown(MarkdownTarget::NewTab), cx);
-                }
-                (action, NewTabPlace::InPane(pane_id)) => {
-                    workspace.update(cx, |ws| add_tab(ws, pane_id, action));
-                }
-                (action, NewTabPlace::NewLayoutTab) => {
-                    workspace.update(cx, |ws| add_layout_tab(ws, action));
+            MenuItem::new(entry.label).icon(entry.icon.icon()).on_select(move |_, cx| {
+                match (&action, &place) {
+                    (AddTabAction::Markdown, NewTabPlace::InPane(pane_id)) => {
+                        shell::dispatch(
+                            &shell,
+                            Command::OpenMarkdown(MarkdownTarget::PaneTab(pane_id.clone())),
+                            cx,
+                        );
+                    }
+                    (AddTabAction::Markdown, NewTabPlace::NewLayoutTab) => {
+                        shell::dispatch(&shell, Command::OpenMarkdown(MarkdownTarget::NewTab), cx);
+                    }
+                    (action, NewTabPlace::InPane(pane_id)) => {
+                        workspace.update(cx, |ws| add_tab(ws, pane_id, action));
+                    }
+                    (action, NewTabPlace::NewLayoutTab) => {
+                        workspace.update(cx, |ws| add_layout_tab(ws, action));
+                    }
                 }
             })
         })
@@ -955,6 +960,26 @@ mod tests {
         assert!(!full.can_add_tab);
         assert_eq!(full.add_tab_tooltip(), "A pane holds at most 10 tabs");
         assert_eq!(choose(&mut ws, &right, "terminal"), None);
+    }
+
+    #[test]
+    fn the_plus_menu_shows_each_agent_with_its_program_icon_and_each_chat_with_the_chat_glyph() {
+        let entries: Vec<_> = add_tab_menu_entries().into_iter().flatten().collect();
+        let icon = |id: &str| entries.iter().find(|e| e.id == id).map(|e| e.icon.clone()).expect(id);
+        for (profile, stem) in [
+            ("claude-code", "claude"),
+            ("codex", "codex"),
+            ("opencode", "opencode"),
+            ("omp", "pi"),
+            ("agy", "antigravity"),
+        ] {
+            assert_eq!(icon(&format!("agent-{profile}")), HeaderIcon::Program(stem));
+        }
+        for entry in entries.iter().filter(|e| matches!(e.action, AddTabAction::Chat(_))) {
+            assert_eq!(entry.icon, HeaderIcon::Symbol(IconName::MessageSquare), "{}", entry.id);
+        }
+        assert_eq!(icon("terminal"), HeaderIcon::Symbol(IconName::Terminal));
+        assert_eq!(agent_icon_stem("my-own-agent"), "agent");
     }
 
     #[test]
