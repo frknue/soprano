@@ -79,7 +79,7 @@ pub fn default_config() -> KeyBindingConfig {
         binding("new-chat", D, "i", false, true, false),
         binding("agent-dashboard", D, "d", false, true, true),
         binding("command-palette", D, "p", false, true, false),
-        binding("find-window", D, "f", false, true, false),
+        binding("find-window", D, "f", false, true, true),
         binding("open-project", D, "p", false, true, true),
         binding("new-window", D, "n", false, true, false),
         binding("rename-window", D, "r", false, true, true),

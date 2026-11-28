@@ -80,10 +80,10 @@ impl Toggle {
             }
             Self::HideWindowTabs => match platform {
                 KeyPlatform::Mac => {
-                    "Hide the numbered window tabs; the tab row moves up. Switch windows from the sidebar, ⌃1…⌃9, or ⌘F."
+                    "Hide the numbered window tabs; the tab row moves up. Switch windows from the sidebar, ⌃1…⌃9, or ⇧⌘F."
                 }
                 KeyPlatform::Other => {
-                    "Hide the numbered window tabs; the tab row moves up. Switch windows from the sidebar, Ctrl+1…Ctrl+9, or Ctrl+Shift+F."
+                    "Hide the numbered window tabs; the tab row moves up. Switch windows from the sidebar, Ctrl+1…Ctrl+9, or Ctrl+Shift+Alt+F."
                 }
             },
             Self::StatusBarUptime => {

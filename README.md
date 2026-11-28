@@ -329,7 +329,7 @@ there; bind one in `settings.json`).
 | `⌘1` / `⌘2` / `⌘3` / `⌘4` / `⌘5` | Launch Codex / Claude Code / OpenCode / omp / Antigravity (in Chat UI or CLI per **Settings ▸ Chat UI**) |
 | `⌘I` | New chat beside the focused pane |
 | `⇧⌘I` | Switch the active agent tab between Chat UI and its terminal CLI (preserving the conversation) |
-| `⇧⌘F` (or `⌘F` in a chat) | Find in Chat — search messages, tool calls and diffs in the active chat |
+| `⌃A` → `F` (or `⌘F` in a chat) | Find in Chat — search messages, tool calls and diffs in the active chat |
 | `⌘D` | New terminal pane beside the focused one |
 | `⌘B` | New browser pane |
 | `⌃A` → `V` | Open the active tab's directory in Visual Studio Code |
@@ -343,7 +343,7 @@ there; bind one in `settings.json`).
 | `⌘P` | Command palette; `Esc` or a click outside it closes it |
 | `⇧⌘D` | Open the Agent Dashboard in its own window, bring it forward, or close it while it is in front |
 | `⇧⌘U` | Open or close Statistics |
-| `⌘F` | Search and switch to a logical window |
+| `⇧⌘F` | Search and switch to a logical window (`⌘F` stays with the focused pane) |
 | `⇧⌘P` | Search configured projects or choose a directory |
 | `⌘,` | Settings |
 | `⌘E` | Toggle sidebar |
@@ -389,7 +389,7 @@ one project.
 
 The session's windows can appear as numbered tabs across the top of the terminal area,
 such as `1  Editor`, `2  Server`, and `3  Logs`, the number muted. They are hidden by
-default: you switch windows from the sidebar, `⌃1`…`⌃9`, or `⌘F`, and the
+default: you switch windows from the sidebar, `⌃1`…`⌃9`, or `⇧⌘F`, and the
 [tab row](#tabs) sits on top. Turn off **Hide window tabs** in **Settings ▸ General**
 (`"hideWindowTabs": false`) to show them. The active tab is raised. Click a tab to switch
 windows or **+** to create one. The row scrolls when it fills up and keeps the active tab
@@ -520,7 +520,7 @@ refreshed as `HEAD` changes on disk. Plain shells carry no status mark, so the m
 left are the agents and running commands. Panes that share a tab sit together, and
 each tab and window starts a little further down.
 
-Press `⌘F` to search the current session's windows by window title, pane or tab title, working
+Press `⇧⌘F` to search the current session's windows by window title, pane or tab title, working
 directory, browser URL, or agent name. Window-title matches rank ahead of matches found
 only inside a split pane; selecting a result restores that window's remembered active
 pane.
@@ -628,7 +628,7 @@ Turn on **Settings ▸ Chat UI** (`chatUi.enabled` and per-agent `chatUi.agents`
 `settings.json`) to launch agents in Chat UI by default, or switch any open agent tab between
 Chat UI and its terminal CLI at any time with `⇧⌘I` (`toggle-chat-ui`) or the pane header's
 mode toggle button (preserving the conversation). Search inside an open chat with `⌘F` (or
-`⇧⌘F` / `find-in-chat`), stepping through matches with `Return` / `⇧Return` or `⌘G` / `⇧⌘G`.
+`⌃A` → `F` / `find-in-chat`), stepping through matches with `Return` / `⇧Return` or `⌘G` / `⇧⌘G`.
 
 Open one wherever a terminal opens: `⌘I` (`new-chat`) or **New \<Agent\> Chat Pane** in the
 sidebar **+** menu beside the focused pane, and from the command palette **New \<Agent\> Chat**,

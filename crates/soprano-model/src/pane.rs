@@ -177,7 +177,7 @@ impl PaneTab {
         std::env::current_dir().ok().map(|dir| dir.to_string_lossy().into_owned())
     }
 
-    /// What window search (⌘F) matches the tab by: title, directory, page, and the attached
+    /// What window search (⇧⌘F) matches the tab by: title, directory, page, and the attached
     /// agent's name.
     pub fn search_terms(&self) -> Vec<String> {
         let agent_name = self

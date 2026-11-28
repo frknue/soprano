@@ -243,7 +243,7 @@ mod tests {
     }
 
     #[test]
-    fn find_window_executes_before_the_terminal_can_claim_command_f() {
+    fn find_window_executes_before_the_terminal_can_claim_shift_command_f() {
         assert!(!dispatches_through_main_menu("find-window"));
         assert!(dispatches_through_main_menu("command-palette"));
         assert!(dispatches_through_main_menu("open-project"));

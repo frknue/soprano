@@ -98,13 +98,13 @@ const TABLE: &[Row] = &[
     ("launch-agy", "Launch Antigravity", "Launch Antigravity agent", Agents, "⌘5", Direct, "5", CMD),
     ("new-chat", "New Chat", "Open a chat with an agent beside the focused pane", Agents, "⌘I", Direct, "i", CMD),
     ("toggle-chat-ui", "Switch Between Chat UI and Terminal", "Switch the active agent tab between Chat UI and its terminal CLI", Agents, "⇧⌘I", Direct, "i", CMD_SHIFT),
-    ("find-in-chat", "Find in Chat", "Search messages in the active chat", Agents, "⇧⌘F", Direct, "f", CMD_SHIFT),
+    ("find-in-chat", "Find in Chat", "Search messages in the active chat", Agents, "Prefix → F", Prefix, "f", NONE),
     ("agent-dashboard", "Agent Dashboard", "Monitor and control agents across all windows", Agents, "⇧⌘D", Direct, "d", CMD_SHIFT),
     ("statistics", "Statistics", "Show omp's tokens and estimated cost over time", Agents, "⇧⌘U", Direct, "u", CMD_SHIFT),
 
     // General (direct)
     ("command-palette", "Commands", "Open the command palette", General, "⌘P", Direct, "p", CMD),
-    ("find-window", "Find Window", "Search and switch to a logical window", General, "⌘F", Direct, "f", CMD),
+    ("find-window", "Find Window", "Search and switch to a logical window", General, "⇧⌘F", Direct, "f", CMD_SHIFT),
     ("open-project", "Open Project", "Open a project directory", General, "⇧⌘P", Direct, "p", CMD_SHIFT),
     ("new-window", "New Window…", "Create a new logical window in a chosen directory", General, "⌘N", Direct, "n", CMD),
     ("rename-window", "Rename Window", "Rename the active logical window", General, "⇧⌘R", Direct, "r", CMD_SHIFT),
@@ -252,6 +252,14 @@ fn migrate_legacy_binding(saved: &KeyBinding, default_binding: KeyBinding) -> Ke
         "resize-down" => plain_prefix && saved.key == "j" && is(saved.shift),
         "resize-up" => plain_prefix && saved.key == "k" && is(saved.shift),
         "resize-right" => plain_prefix && saved.key == "l" && is(saved.shift),
+        // ⌘F stays with the focused pane (terminal, browser, editor, chat); window search
+        // moved to ⇧⌘F, and Find in Chat from ⇧⌘F to Prefix → F.
+        "find-window" => {
+            saved.mode == Direct && saved.key == "f" && is(saved.meta) && !is(saved.ctrl) && !is(saved.shift)
+        }
+        "find-in-chat" => {
+            saved.mode == Direct && saved.key == "f" && is(saved.meta) && !is(saved.ctrl) && is(saved.shift)
+        }
         _ => false,
     };
     if uses_legacy_window_tab_or_resize_default {
@@ -337,13 +345,31 @@ mod tests {
     }
 
     #[test]
-    fn find_window_uses_command_f() {
-        let find_window = binding("find-window");
-        assert_eq!(find_window.mode, Direct);
-        assert_eq!(find_window.key, "f");
-        assert_eq!(find_window.meta, Some(true));
-        assert_ne!(find_window.shift, Some(true));
-        assert_eq!(find_window.default_keys, "⌘F");
+    fn find_window_uses_shift_command_f_and_leaves_command_f_to_the_focused_pane() {
+        assert_eq!(Some(KeyChord::from_binding(&binding("find-window"))), chord("cmd+shift+f"));
+        assert_eq!(binding("find-window").default_keys, "⇧⌘F");
+        assert_eq!(Some(KeyChord::from_binding(&binding("find-in-chat"))), chord("prefix+f"));
+        assert!(
+            !mac_config()
+                .bindings
+                .iter()
+                .any(|b| KeyChord::from_binding(b) == chord("cmd+f").expect("chord"))
+        );
+    }
+
+    #[test]
+    fn saved_command_f_search_defaults_migrate_to_current_bindings() {
+        let mut saved = DefaultKeybindings::config();
+        for b in &mut saved.bindings {
+            *b = match b.id.as_str() {
+                "find-window" => legacy_binding(b, "⌘F", Direct, "f", (None, Some(true), None)),
+                "find-in-chat" => legacy_binding(b, "⇧⌘F", Direct, "f", (None, Some(true), Some(true))),
+                _ => continue,
+            };
+        }
+        let merged = by_id(&DefaultKeybindings::merged_config(&saved));
+        assert_eq!(Some(KeyChord::from_binding(&merged["find-window"])), chord("cmd+shift+f"));
+        assert_eq!(Some(KeyChord::from_binding(&merged["find-in-chat"])), chord("prefix+f"));
     }
 
     #[test]

@@ -152,8 +152,8 @@ pub fn template_for(settings: &AppSettings, keybindings: &KeyBindingConfig, plat
     let chord =
         |text: &str| KeyChord::parse(text).map(|c| c.display_string_for(platform)).unwrap_or_default();
     let (window_switch, find_window, open_project) = match platform {
-        KeyPlatform::Mac => ("⌃1…⌃9".to_owned(), "⌘F".to_owned(), "⇧⌘P".to_owned()),
-        KeyPlatform::Other => ("Ctrl+1…Ctrl+9".to_owned(), chord("cmd+f"), chord("cmd+shift+p")),
+        KeyPlatform::Mac => ("⌃1…⌃9".to_owned(), "⇧⌘F".to_owned(), "⇧⌘P".to_owned()),
+        KeyPlatform::Other => ("Ctrl+1…Ctrl+9".to_owned(), chord("cmd+shift+f"), chord("cmd+shift+p")),
     };
     let (os_name, notifications_note, cmd_note) = match platform {
         KeyPlatform::Mac => (

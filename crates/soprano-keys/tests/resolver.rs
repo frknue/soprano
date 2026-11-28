@@ -206,7 +206,8 @@ fn the_command_palette_and_open_project_go_through_the_app_menu() {
         press(&mut keys, key("p").with_cmd().with_shift()),
         KeyOutcome::MenuAction("open-project".into())
     );
-    assert_eq!(press(&mut keys, key("f").with_cmd()), action("find-window"));
+    assert_eq!(press(&mut keys, key("f").with_cmd().with_shift()), action("find-window"));
+    assert_eq!(press(&mut keys, key("f").with_cmd()), KeyOutcome::PassThrough);
     assert_eq!(press(&mut keys, key("d").with_cmd().with_shift()), action("agent-dashboard"));
 }
 
@@ -218,7 +219,8 @@ fn a_focused_browser_or_editor_keeps_the_chords_it_owns() {
 
     let browser = focused(FocusedContent::Browser);
     assert_eq!(keys.handle(&key("l").with_cmd(), &browser), KeyOutcome::PassThrough);
-    assert_eq!(keys.handle(&key("f").with_cmd(), &browser), action("find-window"));
+    assert_eq!(keys.handle(&key("f").with_cmd().with_shift(), &browser), action("find-window"));
+    assert_eq!(keys.handle(&key("f").with_cmd(), &browser), KeyOutcome::PassThrough);
 
     let editor = focused(FocusedContent::Editor);
     assert_eq!(keys.handle(&key("f").with_cmd(), &editor), KeyOutcome::PassThrough);

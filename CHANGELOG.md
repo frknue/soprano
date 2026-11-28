@@ -50,7 +50,7 @@ the single source of truth for the version shown in **Settings ▸ About**.
   `settings.json`), switch any open local agent tab between Chat UI and its terminal CLI
   preserving its conversation (`⇧⌘I` / `toggle-chat-ui` or the pane header toggle button),
   and search inside a chat timeline with **Find in Chat** (`⌘F` while focused in a chat, or
-  `⇧⌘F` / `find-in-chat`).
+  `⌃A` → `F` / `find-in-chat`).
 - **Antigravity (`agy`) agent support**: built-in `agy` profile with `⌘5` (`launch-agy`)
   shortcut, Antigravity icon, automatic `--dangerously-skip-permissions`, interactive launch
   prompts (`--prompt-interactive`) for Agent Dashboard threads and automations, exact session
@@ -234,6 +234,9 @@ the single source of truth for the version shown in **Settings ▸ About**.
   the command palette. Terminals and agents keep running while they move.
 
 ### Changed
+- **Find Window** (`find-window`) moved from `⌘F` to `⇧⌘F`, so `⌘F` always reaches the
+  focused terminal, browser, editor or chat; **Find in Chat** (`find-in-chat`) moved from
+  `⇧⌘F` to `⌃A` → `F`. Rebind either under **Settings ▸ Keyboard Shortcuts**.
 - **New Window directory picker**: **New Window…** (`⌘N`, the window tab row's `+` button,
   the sidebar `+` menu, and the command palette) now asks for a directory with a searchable
   picker listing the current directory, open workspace folders, configured

@@ -140,7 +140,7 @@ pub struct AppSettings {
     pub appearance: AppearancePreference,
     pub hide_window_bar: bool,
     /// Hides the numbered window tabs; the tab row moves up into their place. On by default:
-    /// the sidebar, `⌃1`…`⌃9`, and `⌘F` already switch windows.
+    /// the sidebar, `⌃1`…`⌃9`, and `⇧⌘F` already switch windows.
     pub hide_window_tabs: bool,
     /// Shows how long Soprano has been running (`Up 2:14:07`) in the status bar. Off by
     /// default: an always-ticking clock is noise.
