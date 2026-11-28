@@ -1308,7 +1308,8 @@ fn parse_codex_models(value: &Value) -> Vec<CodexModel> {
         .collect()
 }
 
-fn effort_label(raw: &str) -> String {
+/// An effort level's label in the thinking chip (`xhigh` → "Extra high").
+pub(crate) fn effort_label(raw: &str) -> String {
     match raw {
         "none" => "None".into(),
         "minimal" => "Minimal".into(),
@@ -1316,6 +1317,7 @@ fn effort_label(raw: &str) -> String {
         "medium" => "Medium".into(),
         "high" => "High".into(),
         "xhigh" => "Extra high".into(),
+        "max" => "Max".into(),
         other => other.to_owned(),
     }
 }

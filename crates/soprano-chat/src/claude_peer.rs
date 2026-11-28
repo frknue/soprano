@@ -31,6 +31,10 @@ use crate::rpc::{
 const CLAUDE_MODELS: &[(&str, &str)] =
     &[("default", "Default"), ("opus", "Opus"), ("fable", "Fable"), ("sonnet", "Sonnet"), ("haiku", "Haiku")];
 
+/// Request id prefixes of the `control_request`s Soprano sends, by which their replies route.
+const SETTINGS_REQUEST: &str = "soprano-settings-";
+const MODEL_REQUEST: &str = "soprano-model-";
+
 /// A model Claude Code offers, as its `initialize` reply lists it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ClaudeModel {
@@ -41,11 +45,19 @@ pub struct ClaudeModel {
     pub description: Option<String>,
     /// The model id the value runs (`opus` → `claude-opus-5-5`), when reported.
     pub resolved: Option<String>,
+    /// The effort levels the model takes (`low` … `max`); empty when it has none.
+    pub efforts: Vec<String>,
 }
 
 impl ClaudeModel {
     fn alias(value: &str, name: &str) -> Self {
-        Self { value: value.into(), name: name.into(), description: None, resolved: None }
+        Self {
+            value: value.into(),
+            name: name.into(),
+            description: None,
+            resolved: None,
+            efforts: Vec::new(),
+        }
     }
 
     fn runs(&self, model: &str) -> bool {
@@ -59,11 +71,18 @@ fn parse_claude_models(models: &[Value]) -> Vec<ClaudeModel> {
         .iter()
         .filter_map(|model| {
             let value = model.get("value").and_then(Value::non_empty_string)?;
+            let efforts = model
+                .get("supportedEffortLevels")
+                .and_then(Value::as_array)
+                .filter(|_| model.get("supportsEffort").and_then(Value::as_bool) == Some(true))
+                .map(|levels| levels.iter().filter_map(Value::non_empty_string).map(str::to_owned).collect())
+                .unwrap_or_default();
             Some(ClaudeModel {
                 value: value.to_owned(),
                 name: model.get("displayName").and_then(Value::non_empty_string).unwrap_or(value).to_owned(),
                 description: model.get("description").and_then(Value::non_empty_string).map(str::to_owned),
                 resolved: model.get("resolvedModel").and_then(Value::non_empty_string).map(str::to_owned),
+                efforts,
             })
         })
         .collect()
@@ -90,6 +109,15 @@ pub struct ClaudeStreamTranslator {
     pub pending_prompt_acp_id: Option<u64>,
     pub current_model: String,
     pub available_models: Vec<ClaudeModel>,
+    /// The effort level Claude Code applies (its settings' `applied.effort`), or the one picked
+    /// since; `None` while unknown or when the model takes none.
+    pub current_effort: Option<String>,
+    /// The `session/new` or `session/load` request answered once Claude Code reports its
+    /// models and settings, so the conversation opens with the real models and effort levels.
+    pub pending_open: Option<u64>,
+    /// `control_request`s a reply calls for, written to Claude Code by the stdout reader.
+    pub outgoing: Vec<Value>,
+    next_settings_request: u64,
     /// Content block indices currently being streamed via `stream_event`.
     streamed_text_this_message: bool,
     streamed_thinking_this_message: bool,
@@ -121,6 +149,10 @@ impl ClaudeStreamTranslator {
                 .iter()
                 .map(|(value, name)| ClaudeModel::alias(value, name))
                 .collect(),
+            current_effort: None,
+            pending_open: None,
+            outgoing: Vec::new(),
+            next_settings_request: 0,
             streamed_text_this_message: false,
             streamed_thinking_this_message: false,
             active_message_id: 0,
@@ -149,14 +181,48 @@ impl ClaudeStreamTranslator {
         if !self.available_models.iter().any(|model| model.value == self.current_model) {
             options.insert(0, json!({"value": self.current_model, "name": self.current_model}));
         }
-        json!([{
+        let mut config = vec![json!({
             "id": "model",
             "name": "Model",
             "category": "model",
             "type": "select",
             "currentValue": self.current_model,
             "options": options,
-        }])
+        })];
+        let efforts = self
+            .available_models
+            .iter()
+            .find(|m| m.value == self.current_model)
+            .or_else(|| self.available_models.iter().find(|m| m.runs(&self.current_model)))
+            .map(|m| m.efforts.as_slice())
+            .unwrap_or_default();
+        if let Some(effort) = &self.current_effort
+            && !efforts.is_empty()
+        {
+            let values: Vec<Value> = efforts
+                .iter()
+                .map(|level| json!({"value": level, "name": crate::codex_peer::effort_label(level)}))
+                .collect();
+            config.push(json!({
+                "id": "effort",
+                "name": "Effort",
+                "category": "thought_level",
+                "type": "select",
+                "currentValue": effort,
+                "options": values,
+            }));
+        }
+        Value::Array(config)
+    }
+
+    /// A `get_settings` request: its reply carries the effort Claude Code applies.
+    pub fn settings_request(&mut self) -> Value {
+        self.next_settings_request += 1;
+        json!({
+            "type": "control_request",
+            "request_id": format!("{SETTINGS_REQUEST}{}", self.next_settings_request),
+            "request": { "subtype": "get_settings" },
+        })
     }
 
     /// Follows the model Claude Code reports running (`claude-opus-5-5`): the picked value
@@ -487,29 +553,60 @@ impl ClaudeStreamTranslator {
                 }
             }
             "control_response" => {
-                // The `initialize` reply lists the account's models with Claude Code's labels.
-                let Some(models) = msg
+                let Some(response) = msg.get("response") else { return out };
+                let request_id = response.get("request_id").and_then(Value::as_str).unwrap_or("");
+                if request_id.starts_with(MODEL_REQUEST) {
+                    // `set_model` lands after requests sent behind it: the effort the new model
+                    // applies is read once it has.
+                    let request = self.settings_request();
+                    self.outgoing.push(request);
+                    return out;
+                }
+                let body = response
                     .get("response")
-                    .filter(|r| r.get("subtype").and_then(Value::as_str) == Some("success"))
-                    .and_then(|r| r.get("response"))
+                    .filter(|_| response.get("subtype").and_then(Value::as_str) == Some("success"));
+                let mut changed = false;
+                // The `initialize` reply lists the account's models with Claude Code's labels.
+                let models = body
                     .and_then(|r| r.get("models"))
                     .and_then(Value::as_array)
-                else {
-                    return out;
-                };
-                let models = parse_claude_models(models);
-                if models.is_empty() {
-                    return out;
+                    .map(|models| parse_claude_models(models))
+                    .unwrap_or_default();
+                if !models.is_empty() {
+                    self.available_models = models;
+                    if !self.available_models.iter().any(|m| m.value == self.current_model) {
+                        let current = self.current_model.clone();
+                        self.adopt_running_model(&current);
+                    }
+                    changed = true;
                 }
-                self.available_models = models;
-                if !self.available_models.iter().any(|m| m.value == self.current_model) {
-                    let current = self.current_model.clone();
-                    self.adopt_running_model(&current);
+                if request_id.starts_with(SETTINGS_REQUEST) {
+                    let effort = body
+                        .and_then(|r| r.get("applied"))
+                        .and_then(|applied| applied.get("effort"))
+                        .and_then(Value::non_empty_string)
+                        .map(str::to_owned);
+                    if effort != self.current_effort {
+                        self.current_effort = effort;
+                        changed = true;
+                    }
+                    // Answered even when Claude Code cannot report its settings.
+                    if let Some(id) = self.pending_open.take() {
+                        out.push(PeerEvent::Response {
+                            id,
+                            result: Ok(
+                                json!({"sessionId": self.session_id, "configOptions": self.config_options()}),
+                            ),
+                        });
+                        return out;
+                    }
                 }
-                out.push(self.session_update(json!({
-                    "sessionUpdate": "config_option_update",
-                    "configOptions": self.config_options(),
-                })));
+                if changed && self.pending_open.is_none() {
+                    out.push(self.session_update(json!({
+                        "sessionUpdate": "config_option_update",
+                        "configOptions": self.config_options(),
+                    })));
+                }
             }
             _ => {}
         }
@@ -671,19 +768,28 @@ impl ClaudeStreamJsonPeer {
             }
             child_state.exited.store(true, Ordering::SeqCst);
             *lock(&child_state.stdin) = None;
-            if let Some(prompt_id) = lock(&translator).pending_prompt_acp_id.take() {
-                sink.send(PeerEvent::Response { id: prompt_id, result: Err(JsonRpcError::closed()) });
+            {
+                let mut translator = lock(&translator);
+                if let Some(prompt_id) = translator.pending_prompt_acp_id.take() {
+                    sink.send(PeerEvent::Response { id: prompt_id, result: Err(JsonRpcError::closed()) });
+                }
+                if let Some(open_id) = translator.pending_open.take() {
+                    sink.send(PeerEvent::Response { id: open_id, result: Err(JsonRpcError::closed()) });
+                }
             }
             sink.send(PeerEvent::Exit { status, stderr: tail.text() });
         });
         self.threads.push(waiter);
-        // Asks for the account's models; the reply replaces the alias placeholders.
+        // Asks for the account's models and the effort Claude Code applies; the replies
+        // replace the alias placeholders and answer the pending open.
         self.next_control_out_id += 1;
         self.child.write_json(&json!({
             "type": "control_request",
             "request_id": format!("soprano-initialize-{}", self.next_control_out_id),
             "request": { "subtype": "initialize" },
         }));
+        let settings = lock(&self.translator).settings_request();
+        self.child.write_json(&settings);
         Ok(())
     }
 }
@@ -713,47 +819,33 @@ impl JsonRpcPeer for ClaudeStreamJsonPeer {
                     })),
                 });
             }
-            "session/new" => {
-                let session_id = generate_uuid_v4();
-                let options = {
+            "session/new" | "session/load" => {
+                let resume = method == "session/load";
+                let session_id = if resume {
+                    params.get("sessionId").and_then(Value::as_str).unwrap_or_default().to_owned()
+                } else {
+                    generate_uuid_v4()
+                };
+                {
                     let mut tr = lock(&self.translator);
                     tr.session_id = session_id.clone();
-                    tr.config_options()
-                };
-                if let Err(error) = self.spawn_claude(None, Some(&session_id)) {
-                    sink.send(PeerEvent::Response {
-                        id: acp_id,
-                        result: Err(JsonRpcError::new(JsonRpcError::INTERNAL_ERROR, error.to_string())),
-                    });
-                    return Ok(acp_id);
+                    tr.pending_open = Some(acp_id);
                 }
-                sink.send(PeerEvent::Response {
-                    id: acp_id,
-                    result: Ok(json!({"sessionId": session_id, "configOptions": options})),
-                });
-            }
-            "session/load" => {
-                let session_id =
-                    params.get("sessionId").and_then(Value::as_str).unwrap_or_default().to_owned();
-                let options = {
-                    let mut tr = lock(&self.translator);
-                    tr.session_id = session_id.clone();
-                    tr.config_options()
-                };
-                if let Some(home) = soprano_platform::paths::home_dir().to_str().map(Path::new) {
+                if resume && let Some(home) = soprano_platform::paths::home_dir().to_str().map(Path::new) {
                     replay_claude_transcript(&sink, &session_id, home);
                 }
-                if let Err(error) = self.spawn_claude(Some(&session_id), None) {
+                let spawned = if resume {
+                    self.spawn_claude(Some(&session_id), None)
+                } else {
+                    self.spawn_claude(None, Some(&session_id))
+                };
+                if let Err(error) = spawned {
+                    lock(&self.translator).pending_open = None;
                     sink.send(PeerEvent::Response {
                         id: acp_id,
                         result: Err(JsonRpcError::new(JsonRpcError::INTERNAL_ERROR, error.to_string())),
                     });
-                    return Ok(acp_id);
                 }
-                sink.send(PeerEvent::Response {
-                    id: acp_id,
-                    result: Ok(json!({"sessionId": session_id, "configOptions": options})),
-                });
             }
             "session/prompt" => {
                 let text = extract_prompt_text(&params);
@@ -773,17 +865,25 @@ impl JsonRpcPeer for ClaudeStreamJsonPeer {
             "session/set_config_option" => {
                 let config_id = params.get("configId").and_then(Value::as_str).unwrap_or("");
                 let value = params.get("value").and_then(Value::as_str).unwrap_or("");
-                let options = {
+                let (options, settings) = {
                     let mut tr = lock(&self.translator);
-                    if config_id == "model" && !value.is_empty() && tr.current_model != value {
-                        tr.current_model = value.to_owned();
-                        tr.context_window = None;
+                    let mut settings = None;
+                    match config_id {
+                        "model" if !value.is_empty() && tr.current_model != value => {
+                            tr.current_model = value.to_owned();
+                            tr.context_window = None;
+                        }
+                        "effort" if !value.is_empty() => {
+                            tr.current_effort = Some(value.to_owned());
+                            settings = Some(tr.settings_request());
+                        }
+                        _ => {}
                     }
-                    tr.config_options()
+                    (tr.config_options(), settings)
                 };
                 if config_id == "model" && !value.is_empty() && self.spawned {
                     self.next_control_out_id += 1;
-                    let req_id = format!("soprano-model-{}", self.next_control_out_id);
+                    let req_id = format!("{MODEL_REQUEST}{}", self.next_control_out_id);
                     let model_value =
                         if value == "default" { Value::Null } else { Value::String(value.to_owned()) };
                     self.child.write_json(&json!({
@@ -794,6 +894,22 @@ impl JsonRpcPeer for ClaudeStreamJsonPeer {
                             "model": model_value,
                         }
                     }));
+                }
+                if let Some(settings) = settings
+                    && self.spawned
+                {
+                    // Applies to the next turn; the settings read back show what Claude Code
+                    // made of it (a level above the configured maximum is clamped).
+                    self.next_control_out_id += 1;
+                    self.child.write_json(&json!({
+                        "type": "control_request",
+                        "request_id": format!("soprano-effort-{}", self.next_control_out_id),
+                        "request": {
+                            "subtype": "apply_flag_settings",
+                            "settings": { "effortLevel": value },
+                        }
+                    }));
+                    self.child.write_json(&settings);
                 }
                 sink.send(PeerEvent::Response { id: acp_id, result: Ok(json!({"configOptions": options})) });
             }
@@ -874,7 +990,14 @@ fn read_claude_stdout(
                 return;
             }
             let Some(message) = soprano_agents::json::parse_value(&line) else { continue };
-            let events = lock(translator).handle_message(&message);
+            let (events, outgoing) = {
+                let mut translator = lock(translator);
+                let events = translator.handle_message(&message);
+                (events, std::mem::take(&mut translator.outgoing))
+            };
+            for request in &outgoing {
+                child.write_json(request);
+            }
             for event in events {
                 sink.send(event);
             }
@@ -1578,6 +1701,47 @@ mod tests {
                 "Which database?": "SQLite",
                 "Which OSes?": "macOS, Linux"
             })
+        );
+    }
+
+    #[test]
+    fn the_open_waits_for_claude_codes_settings_and_offers_the_models_effort_levels() {
+        let mut tr = ClaudeStreamTranslator::new("sess-effort");
+        tr.pending_open = Some(7);
+        let initialize = json!({"type": "control_response", "response": {"subtype": "success", "request_id": "soprano-initialize-1", "response": {"models": [
+            {"value": "default", "resolvedModel": "claude-opus-5-5", "displayName": "Default", "supportsEffort": true, "supportedEffortLevels": ["low", "high", "max"]},
+            {"value": "haiku", "resolvedModel": "claude-haiku-4-5", "displayName": "Haiku"}
+        ]}}});
+        assert!(tr.handle_message(&initialize).is_empty(), "nothing shows before the conversation opens");
+
+        let settings = |effort: &str| json!({"type": "control_response", "response": {"subtype": "success", "request_id": "soprano-settings-1", "response": {"applied": {"model": "claude-opus-5-5", "effort": effort}}}});
+        let events = tr.handle_message(&settings("high"));
+        let [PeerEvent::Response { id: 7, result: Ok(opened) }] = events.as_slice() else {
+            panic!("expected the open answer, got {events:?}")
+        };
+        let effort = &opened["configOptions"][1];
+        assert_eq!(effort["category"], "thought_level");
+        assert_eq!(effort["currentValue"], "high");
+        let levels: Vec<&str> =
+            effort["options"].as_array().into_iter().flatten().filter_map(|o| o["name"].as_str()).collect();
+        assert_eq!(levels, ["Low", "High", "Max"]);
+
+        // A model switch reads the settings again once Claude Code has made it.
+        let switched = json!({"type": "control_response", "response": {"subtype": "success", "request_id": "soprano-model-3"}});
+        assert!(tr.handle_message(&switched).is_empty());
+        assert_eq!(tr.outgoing.pop().map(|r| r["request"]["subtype"].clone()), Some(json!("get_settings")));
+
+        let events = tr.handle_message(&settings("max"));
+        let [PeerEvent::Notification { params, .. }] = events.as_slice() else {
+            panic!("expected a config update")
+        };
+        assert_eq!(params["update"]["configOptions"][1]["currentValue"], "max");
+
+        tr.current_model = "haiku".into();
+        assert_eq!(
+            tr.config_options().as_array().map(Vec::len),
+            Some(1),
+            "a model without effort levels has no chip"
         );
     }
 }

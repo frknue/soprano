@@ -108,6 +108,8 @@ impl JsonRpcPeer for FakeAgent {
             "session/new" => Some(json!({"sessionId": "new-session", "configOptions": [
                 {"id": "model", "name": "Model", "category": "model", "type": "select", "currentValue": "a/one",
                  "options": [{"value": "a/one", "name": "One"}, {"value": "a/two", "name": "Two"}]},
+                {"id": "thinking", "name": "Thinking", "category": "thought_level", "type": "select", "currentValue": "low",
+                 "options": [{"value": "low", "name": "Low"}, {"value": "high", "name": "High"}]},
             ]})),
             "session/prompt" => {
                 state.prompts.push(id);
@@ -713,6 +715,35 @@ fn a_chip_closes_its_own_popover_and_the_editor_gets_the_keyboard_back(cx: &mut 
     let focused =
         cx.update(|window, cx| gpui::Focusable::focus_handle(composer.read(cx), cx).is_focused(window));
     assert!(focused);
+}
+
+#[gpui::test]
+fn a_narrow_pane_still_picks_the_thinking_level_from_its_glyph(cx: &mut TestAppContext) {
+    let (chat, cx) = open_chat(cx);
+    chat.start(cx);
+    cx.simulate_resize(gpui::size(px(400.), px(700.)));
+    settle(cx);
+    // The composer takes the width the chat was painted at on its next render.
+    cx.update(|_, cx| chat.view.update(cx, |_, cx| cx.notify()));
+    settle(cx);
+    let composer = cx.update(|_, cx| chat.view.read(cx).composer().clone());
+    assert!(composer.read_with(cx, |c, _| c.chip_compaction()) >= 1, "the composer is laid out narrow");
+
+    let chip = composer.read_with(cx, |c, _| c.anchors.traits.get());
+    assert!(chip.size.width > px(0.), "the thinking chip is on screen");
+    cx.simulate_click(chip.center(), Modifiers::none());
+    cx.run_until_parked();
+    assert_eq!(
+        composer.read_with(cx, |c, _| c.popover.as_ref().map(|p| p.kind)),
+        Some(crate::PopoverKind::Traits)
+    );
+
+    cx.simulate_keystrokes("down enter");
+    settle(cx);
+    let picked = chat.agent.state().requests.iter().any(|(method, params)| {
+        method == "session/set_config_option" && params["configId"] == "thinking" && params["value"] == "high"
+    });
+    assert!(picked, "the pick reaches the agent");
 }
 
 #[gpui::test]

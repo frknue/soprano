@@ -385,6 +385,10 @@ the single source of truth for the version shown in **Settings ▸ About**.
   actions. Workspaces saved with depth layers reopen with each layer as its own tab.
 
 ### Fixed
+- **Effort in Claude Code chats**: the composer's thinking chip now picks Claude Code's effort
+  level (Low through Max, as the model offers them) in Chat UI and the Agent Dashboard, and a
+  new Claude Code thread opens with the account's real models instead of the alias list. In a
+  narrow pane the thinking chip of every agent stays as a brain glyph instead of disappearing.
 - **Claude Code model picker in Chat UI**: lists the models your Claude Code reports, with its
   own names (Opus 5.5, Fable 5.2, Sonnet 5.5, …) instead of four generic aliases, keeps the
   picked alias after the first turn, and shows the Claude mark instead of omp's π.

@@ -302,8 +302,8 @@ impl ContextMeterReading {
     }
 }
 
-/// How far the footer's chips give way in a narrow composer: 0 all of them, 1 without the
-/// thinking chip, 2 without the permissions chip too, 3 the model as its glyph alone.
+/// How far the footer's chips give way in a narrow composer: 0 all of them, 1 the thinking
+/// level as its glyph alone, 2 without the permissions chip too, 3 the model as its glyph alone.
 pub fn chip_compaction(width: f32) -> u8 {
     if width >= 460.0 {
         0

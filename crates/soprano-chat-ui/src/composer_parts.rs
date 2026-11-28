@@ -559,7 +559,7 @@ impl ComposerView {
                 )
         });
 
-        let has_thinking = option_of(&options, THINKING_CATEGORY).filter(|_| compaction < 1).is_some();
+        let has_thinking = option_of(&options, THINKING_CATEGORY).is_some();
         let model_chip = option_of(&options, MODEL_CATEGORY).map(|model| {
             let value = current_value_entry(model);
             let title = (compaction < 3)
@@ -580,11 +580,15 @@ impl ComposerView {
                         .size_full(),
                 )
         });
-        let traits_chip = option_of(&options, THINKING_CATEGORY).filter(|_| compaction < 1).map(|thinking| {
+        // A narrow composer keeps the thinking level as its glyph alone: it has no other way in.
+        let traits_chip = option_of(&options, THINKING_CATEGORY).map(|thinking| {
             let title = option_title(thinking.current_name());
             let tip = format!("{}: {title}", thinking.name);
             let anchors = anchors.clone();
-            chip("composer-traits", Some(title), None, true, open == Some(PopoverKind::Traits), running, &t)
+            let glyph = (compaction >= 1)
+                .then(|| icon(IconName::Brain).size(14.0 * zoom).color(t.muted).into_any_element());
+            let title = (compaction < 1).then_some(title);
+            chip("composer-traits", title, glyph, true, open == Some(PopoverKind::Traits), running, &t)
                 .pl(t.cz(4.0))
                 .child(icon(IconName::ChevronDown).size(11.0 * zoom).color(t.muted))
                 .tooltip(soprano_ui::tooltip(tip))
